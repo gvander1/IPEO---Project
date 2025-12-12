@@ -3,7 +3,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 
 import os
-import glob
+from glob import glob
 import math
 import random
 
@@ -109,7 +109,4 @@ class LCAmazon(Dataset):
         if self.transforms is not None:
             img, label = self.transforms(img, label)
         return img, label
-    
-    
-
     
