@@ -1,11 +1,13 @@
 from torch.utils.data import Dataset
 
 from PIL import Image
+import rasterio
 
 import os
 from glob import glob
 import math
 import random
+import numpy as np
 
 class LCAmazon(Dataset):
     # mapping between label class names and indices
@@ -104,9 +106,31 @@ class LCAmazon(Dataset):
 
     def __getitem__(self, idx):
         img_path, lbl_path = self.samples[idx]
-        img = Image.open(img_path)
-        label = Image.open(lbl_path)
+
+        # Read multispectral S2 image
+        with rasterio.open(img_path) as src:
+            img = src.read().astype(np.float32)  # (C, H, W)
+
+    # Read label mask (single channel)
+        with rasterio.open(lbl_path) as src:
+            label = src.read(1).astype(np.int32)
+
+    # If transforms expect (H, W, C), transpose:
+        img = np.transpose(img, (1, 2, 0))  # -> (H, W, C)
+
+        if self.transforms is not None:
+            img, label = self.transforms(img, label)
+
+        return img, label
+"""
+    def __getitem__(self, idx):
+        img_path, lbl_path = self.samples[idx]
+        with rasterio.open(img_path) as src:
+            # returns array shape (bands, H, W)
+            img = src.read().astype(np.float32)
+        with rasterio.open(lbl_path) as src:
+            label = src.read(1)  # read single band
         if self.transforms is not None:
             img, label = self.transforms(img, label)
         return img, label
-    
+    """
