@@ -21,6 +21,10 @@ def train_rf_per_pixel_many(
 
     features : np.ndarray, shape (N, 64, 47, 47)
     labels   : np.ndarray, shape (N, 47, 47)
+    Random forest va classifier pixel par pixel. 1 pixel dans AE = 1 vecteur de 64 dimension associé
+    à un pixel avec la classe correspondante dans le label
+    1 sample c'est enfait un vecteur, c'est a dire que Random for traite pixels par pixel
+    dans le cas de notre dataset on a en quelques sorte 5000x45x45 training exaample en quelque sortes
     """
 
     feats = np.asarray(features)   # (N, 64, 47, 47)
