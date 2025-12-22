@@ -11,7 +11,7 @@ import numpy as np
 
 class LCAmazon(Dataset):
     # mapping between label class names and indices
-    #based on codigos da legenda.csv file 
+    # based on codigos da legenda.csv file 
     LABEL_CLASSES = {
     "Forest": 1,
     "Forest Formation": 3,
@@ -55,7 +55,7 @@ class LCAmazon(Dataset):
     def __init__(self, root, modality="s2", split="train", transforms=None,
                  val_ratio=0.15, seed=42):
         """
-        split: "train", "val", or "test"
+        split: "train", "val", or "test" ---- modality: "s2" for sentinel "AE" else
         """
         self.transforms = transforms
         self.modality = modality
