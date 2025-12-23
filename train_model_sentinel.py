@@ -5,6 +5,9 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 import torchvision.transforms as T
+import torch.nn.functional as F
+import numpy as np
+import matplotlib.pyplot as plt
 from models.lcamazon import LCAmazon
 from torch.utils.data import DataLoader
 
@@ -15,6 +18,7 @@ else:
     print("GPU to be started !")
 
 train_dataset = LCAmazon(root="DATA", modality="s2", split="train")
+val_dataset = LCAmazon(root="DATA", modality="s2", split="val")
 
 '''
 #sanity check
@@ -23,16 +27,29 @@ print(np.shape(img))
 '''
 
 #Data Loader
-train_dl = DataLoader(train_dataset, batch_size = 16, shuffle=True, num_workers=2)
+train_dl = DataLoader(train_dataset, batch_size = 16, shuffle=True, num_workers=1)
+val_dl = DataLoader(val_dataset, batch_size=16, num_workers=1)
 
 #for image, label in train_dl:
 #    print(image.shape, label.shape)
 #    image has shape [16, 47, 47, 12] label has shape [16, 47, 47]
 
-#Loading of Computer Vision Models --> using torchvision, choose a resnet18 model
-from torchvision.models import resnet18
-model = resnet18(num_classes=38)  #we have 38 classes
+#Loading of Computer Vision Models --> using torchvision, choose a fcn resnet50
+from torchvision.models.segmentation import fcn_resnet50
+model = fcn_resnet50(progress=True, num_classes=38)  #we have 38 classes
 #print(model) #just to see how it is structured
+
+# The resnet18 model is made for 3 bands --> need to change the first convolution layer to fix this
+model.backbone.conv1 = torch.nn.Conv2d(
+    in_channels=12,
+    out_channels=64,
+    kernel_size=7,
+    stride=2,
+    padding=3,
+    bias=False
+)
+
+#print(model) #see if it worked
 
 # Model Training
 # Loss function
@@ -64,20 +81,131 @@ learning_rate = 0.01
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
 # Define single training step
-weight_value_before = float(model.fc.weight[0,0])
-print(weight_value_before)
+# Before training step
+#weight_before = model.classifier[4].weight[0, 0, 0, 0].item()
+#print("Weight before:", weight_before)
 idx, batch = next(enumerate(train_dl))
 model.train()
 optimizer.zero_grad()
 x, y = batch
+x = x.permute(0, 3, 1, 2) #Putting tensor in right order (Batch, Channel, Height, Width)
 device = "cuda" #running on GPU
 model = model.to(device)
 x = x.to(device)
-y = y.to(device)
+y = y.to(device).long() #the crossentropy loss expects a type long
 #forward pass (i.e prediction)
-y_logit = model(x)
-loss = criterion(y_logit, x)
+outputs = model(x)
+y_logit = outputs["out"]
+loss = criterion(y_logit, y)
 #backprop
 loss.backward()
 #update model parameters
 optimizer.step()
+
+#weight_after = model.classifier[4].weight[0, 0, 0, 0].item()
+#print("Weight after:", weight_after)
+
+#Ok it seems to work correctly, let's now package the training step into a function
+def training_step(batch, model, optimizer, device="cuda"):
+    model.train()
+    optimizer.zero_grad()
+    model.zero_grad()
+    x,y = batch
+    x = x.permute(0, 3, 1, 2) #Putting tensor in right order (Batch, Channel, Height, Width)
+    x = x.to(device)
+    y = y.to(device).long() #the crossentropy loss expects a type long
+    #forward pass (i.e prediction)
+    outputs = model(x)
+    y_hat = outputs["out"]
+    loss = criterion(y_hat, y)
+    loss.backward() # backprop
+    optimizer.step() # update model param
+    # lets also calculate accuracy for fun
+    # FYI
+    # .cpu() moves the data back to cpu (if on GPU)
+    # .detach() removes gradients (we dont need them for accuracy)
+    # .numpy() converts the tensor to numpy for better handling later
+    predictions = y_hat.argmax(1).cpu().detach().numpy()
+    ground_truth = y.cpu().detach().numpy()
+
+    # accuracy is the mean of correct (1) and incorrect (0) classifications
+    accuracy = (predictions == ground_truth).mean()
+
+    return loss, accuracy
+
+def train_epoch(train_dl, val_dl, model, optimizer):
+    train_losses, train_accuracies, val_losses, val_accuracies = [], [], [], []
+    for batch in train_dl:
+        loss, accuracy = training_step(batch, model, optimizer)
+        train_losses.append(loss.cpu().detach().numpy())
+        train_accuracies.append(accuracy)
+    for batch in val_dl:
+        loss, accuracy = prediction_step(batch, model)
+        val_losses.append(loss.cpu().detach().numpy())
+        val_accuracies.append(accuracy)
+    val_losses, train_losses, val_accuracies, train_accuracies = np.stack(val_losses).mean(), np.stack(train_losses).mean(), np.stack(val_accuracies).mean(), np.stack(train_accuracies).mean()
+    return val_losses, train_losses, val_accuracies, train_accuracies
+
+# Model Training
+num_epochs = 3 #computing 30 epochs takes a while, use 3 for debugging
+stats = [] #after 30 epochs we reach 85 % accuracy with current hyperparameters
+for epoch in range(num_epochs):
+    trainloss, trainaccuracy = train_epoch(train_dl, model, optimizer)
+    print(f"epoch {epoch}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
+
+    stats.append({
+        "trainloss":float(trainloss),
+        "trainaccuracy":float(trainaccuracy),
+        "epoch":epoch
+    })
+
+# Plotting train accuracy as a function of epoch
+trainlosses = np.stack([stat["trainloss"] for stat in stats])
+trainaccuracy = np.stack([stat["trainaccuracy"] for stat in stats])
+epoch = np.stack([stat["epoch"] for stat in stats])
+
+fig, ax = plt.subplots()
+ax.plot(epoch, trainaccuracy)
+ax.set_xlabel("epoch")
+ax.set_ylabel("train accuracy")
+plt.savefig("DATA/results/s2_train_accuracy.png")
+
+# Model Testing on validation set
+val_dataset = LCAmazon(root="DATA", modality="s2", split="val")
+# DataLoader as before
+val_dl = DataLoader(val_dataset, batch_size=16, num_workers=1)
+
+@torch.no_grad() #we wkip the calculation of the gradient graph here to save time
+def prediction_step(batch, model, device="cuda"):
+    model.eval()
+    x, y = batch
+    x = x.permute(0, 3, 1, 2) #Putting tensor in right order (Batch, Channel, Height, Width)
+    x = x.to(device)
+    y = y.to(device).long() #the crossentropy loss expects a type long
+    #forward pass (i.e prediction)
+    outputs = model(x)
+    y_hat = outputs["out"]
+    loss = criterion(y_hat, y)
+    predictions = y_hat.argmax(1).cpu().detach().numpy()
+    ground_truth = y.cpu().detach().numpy()
+    # accuracy is the mean of correct (1) and incorrect (0) classifications
+    accuracy = (predictions == ground_truth).mean()
+    return loss, accuracy
+
+losses, accuracies = [], []
+for batch in val_dl:
+    loss, accuracy = prediction_step(batch, model)
+    losses.append(loss.cpu().detach().numpy())
+    accuracies.append(accuracy)
+losses, accuracies = np.stack(losses).mean(), np.stack(accuracies).mean()
+print(f"valloss {losses:.2f}, val accuracy {accuracies*100:.2f}")
+
+
+
+## IDEAS to improve model accuracy
+# Try Adam or AdamW optimizer
+# Regularize through Dropouts or Data augmentation (add random rotations) using torchvision.transforms
+# Add a pre-processing conv layer to reduce from 12 to 3 channels
+# Use Weighted Cross-Entropy to deal with class imbalance
+#       weights = torch.tensor([1.0, 2.0, 0.5, ...]).to(device)  # adjust per class
+#       criterion = CrossEntropyLoss(weight=weights)
