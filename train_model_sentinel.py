@@ -133,48 +133,6 @@ def training_step(batch, model, optimizer, device="cuda"):
 
     return loss, accuracy
 
-def train_epoch(train_dl, val_dl, model, optimizer):
-    train_losses, train_accuracies, val_losses, val_accuracies = [], [], [], []
-    for batch in train_dl:
-        loss, accuracy = training_step(batch, model, optimizer)
-        train_losses.append(loss.cpu().detach().numpy())
-        train_accuracies.append(accuracy)
-    for batch in val_dl:
-        loss, accuracy = prediction_step(batch, model)
-        val_losses.append(loss.cpu().detach().numpy())
-        val_accuracies.append(accuracy)
-    val_losses, train_losses, val_accuracies, train_accuracies = np.stack(val_losses).mean(), np.stack(train_losses).mean(), np.stack(val_accuracies).mean(), np.stack(train_accuracies).mean()
-    return val_losses, train_losses, val_accuracies, train_accuracies
-
-# Model Training
-num_epochs = 3 #computing 30 epochs takes a while, use 3 for debugging
-stats = [] #after 30 epochs we reach 85 % accuracy with current hyperparameters
-for epoch in range(num_epochs):
-    trainloss, trainaccuracy = train_epoch(train_dl, model, optimizer)
-    print(f"epoch {epoch}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
-
-    stats.append({
-        "trainloss":float(trainloss),
-        "trainaccuracy":float(trainaccuracy),
-        "epoch":epoch
-    })
-
-# Plotting train accuracy as a function of epoch
-trainlosses = np.stack([stat["trainloss"] for stat in stats])
-trainaccuracy = np.stack([stat["trainaccuracy"] for stat in stats])
-epoch = np.stack([stat["epoch"] for stat in stats])
-
-fig, ax = plt.subplots()
-ax.plot(epoch, trainaccuracy)
-ax.set_xlabel("epoch")
-ax.set_ylabel("train accuracy")
-plt.savefig("DATA/results/s2_train_accuracy.png")
-
-# Model Testing on validation set
-val_dataset = LCAmazon(root="DATA", modality="s2", split="val")
-# DataLoader as before
-val_dl = DataLoader(val_dataset, batch_size=16, num_workers=1)
-
 @torch.no_grad() #we wkip the calculation of the gradient graph here to save time
 def prediction_step(batch, model, device="cuda"):
     model.eval()
@@ -192,15 +150,51 @@ def prediction_step(batch, model, device="cuda"):
     accuracy = (predictions == ground_truth).mean()
     return loss, accuracy
 
-losses, accuracies = [], []
-for batch in val_dl:
-    loss, accuracy = prediction_step(batch, model)
-    losses.append(loss.cpu().detach().numpy())
-    accuracies.append(accuracy)
-losses, accuracies = np.stack(losses).mean(), np.stack(accuracies).mean()
-print(f"valloss {losses:.2f}, val accuracy {accuracies*100:.2f}")
 
+def train_epoch(train_dl, val_dl, model, optimizer):
+    train_losses, train_accuracies, val_losses, val_accuracies = [], [], [], []
+    for batch in train_dl:
+        loss, accuracy = training_step(batch, model, optimizer)
+        train_losses.append(loss.cpu().detach().numpy())
+        train_accuracies.append(accuracy)
+    for batch in val_dl:
+        loss, accuracy = prediction_step(batch, model)
+        val_losses.append(loss.cpu().detach().numpy())
+        val_accuracies.append(accuracy)
+    val_losses, train_losses, val_accuracies, train_accuracies = np.stack(val_losses).mean(), np.stack(train_losses).mean(), np.stack(val_accuracies).mean(), np.stack(train_accuracies).mean()
+    return val_losses, train_losses, val_accuracies, train_accuracies
 
+# Model Training
+num_epochs = 30 #computing 30 epochs takes a while (15 minutes currently), use 3 for debugging
+stats = [] #after 30 epochs we reach 85 % accuracy with current hyperparameters, staying at 62% val accuracy (=overfitting !)
+for epoch in range(num_epochs):
+    valloss, trainloss, valaccuracy, trainaccuracy = train_epoch(train_dl, val_dl, model, optimizer)
+    print(f"epoch {epoch}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
+    print(f"epoch {epoch}; valloss {valloss:.2f}, val accuracy {valaccuracy*100:.2f}%")
+    stats.append({
+        "trainloss":float(trainloss),
+        "trainaccuracy":float(trainaccuracy),
+        "valloss":float(valloss),
+        "valaccuracy":float(valaccuracy),
+        "epoch":epoch
+    })
+
+# Plotting train accuracy as a function of epoch
+trainlosses = np.stack([stat["trainloss"] for stat in stats])
+trainaccuracy = np.stack([stat["trainaccuracy"] for stat in stats])
+vallosses = np.stack([stat["valloss"] for stat in stats])
+valaccuracy = np.stack([stat["valaccuracy"] for stat in stats])
+epoch = np.stack([stat["epoch"] for stat in stats])
+
+fig, ax = plt.subplots()
+ax.plot(epoch, trainaccuracy, label="Train Accuracy", marker='o')
+ax.plot(epoch, valaccuracy, label="Validation Accuracy", marker='x')
+ax.set_xlabel("Epoch")
+ax.set_ylabel("Accuracy")
+ax.set_title("Train vs Validation Accuracy")
+ax.legend()
+ax.grid(True)
+plt.savefig("DATA/results/s2_train_val_accuracy.png")
 
 ## IDEAS to improve model accuracy
 # Try Adam or AdamW optimizer
