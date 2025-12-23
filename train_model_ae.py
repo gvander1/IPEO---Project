@@ -5,221 +5,175 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import joblib  # pip install joblib if not already there
 from models.lcamazon import LCAmazon
+from tqdm.auto import tqdm
+import pandas as pd
 
-def train_rf_per_pixel_many(
-    features,        # (N, 64, 47, 47)
-    labels,          # (N, 47, 47)
-    ignore_label=None,
-    max_samples=200_000,
+# create df with class value, nb of pixels and relative proportions
+def label_proportions(dataset):
+    """
+    dataset: e.g. LCAmazon(..., split='train'), where dataset[i] -> (img, lbl)
+             and lbl has shape (H, W) with integer class ids.
+    """
+    all_labels = []
+
+    for i in tqdm(range(len(dataset))):
+        _, lbl = dataset[i]          # ignore image, keep label map
+        all_labels.append(lbl.ravel())
+
+    labels_flat = np.concatenate(all_labels, axis=0)  # shape: (N_pixels,)
+    classes, counts = np.unique(labels_flat, return_counts=True)
+    total = labels_flat.size
+    proportions = counts / total
+
+    df = pd.DataFrame({
+        "class_id": classes,
+        "pixel_count": counts,
+        "proportion": proportions,
+    })
+
+
+    return df
+
+
+#Function class aware subsampling + random forest fitting
+
+def train_rf_from_flat(
+    X_tr, y_tr,
+    X_val, y_val,
+    max_per_class=5000,
     n_estimators=200,
     random_state=10,
     n_jobs=-1
 ):
-    """
-    Train a per-pixel RandomForestClassifier from many feature images
-    of shape (64, 47, 47) and label maps of shape (47, 47).
-
-    features : np.ndarray, shape (N, 64, 47, 47)
-    labels   : np.ndarray, shape (N, 47, 47)
-    Random forest va classifier pixel par pixel. 1 pixel dans AE = 1 vecteur de 64 dimension associé
-    à un pixel avec la classe correspondante dans le label
-    1 sample c'est enfait un vecteur, c'est a dire que Random forest traite pixels par pixel
-    dans le cas de notre dataset on a en quelques sorte 5000x45x45 training example
-    """
-
-    feats = np.asarray(features)   # (N, 64, 47, 47)
-    lbls  = np.asarray(labels)     # (N, 47, 47)
-
-    assert feats.ndim == 4 and feats.shape[1] == 64, "features must be (N,64,47,47)"
-    N, C, H, W = feats.shape
-    assert lbls.shape == (N, H, W), "labels must be (N,47,47)"
-
-    # (N, 64, 47, 47) -> (N, H, W, C)
-    feats_nhwc = np.transpose(feats, (0, 2, 3, 1))   # (N, 47, 47, 64)
-
-    # Flatten across all images and pixels
-    X = feats_nhwc.reshape(-1, C)   # (N*H*W, 64)
-    y = lbls.reshape(-1)            # (N*H*W,)
-
-    # Optionally drop ignore_label pixels
-    if ignore_label is not None:
-        mask = (y != ignore_label)
-        X = X[mask]
-        y = y[mask]
-
-    # Optionally subsample pixels (to limit memory/time)
+    # class-aware subsample on flat y_tr
     rng = np.random.default_rng(random_state)
-    if X.shape[0] > max_samples:
-        idx = rng.choice(X.shape[0], max_samples, replace=False)
-        X = X[idx]
-        y = y[idx]
+    X_sub_list, y_sub_list = [], []
+    classes, counts = np.unique(y_tr, return_counts=True)
+    print("Full train class counts:", dict(zip(classes, counts)))
 
-    # Train/val split
-    X_tr, X_val, y_tr, y_val = train_test_split(
-        X, y, test_size=0.2, random_state=random_state, stratify=y
-    )
-    print("Total pixels:", X.shape[0])
-    print("Unique labels:", np.unique(y, return_counts=True))
+    for cls in classes:
+        idx_cls = np.where(y_tr == cls)[0]
+        n_take = min(len(idx_cls), max_per_class)
+        chosen = rng.choice(idx_cls, n_take, replace=False)
+        X_sub_list.append(X_tr[chosen])
+        y_sub_list.append(y_tr[chosen])
 
+    X_sub = np.concatenate(X_sub_list, axis=0)
+    y_sub = np.concatenate(y_sub_list, axis=0)
+    print("Subsample class counts:", dict(zip(*np.unique(y_sub, return_counts=True))))
 
     rf = RandomForestClassifier(
         n_estimators=n_estimators,
-        max_depth=None,
+        max_depth=10,
         n_jobs=n_jobs,
+        #class_weight="balanced_subsample",
         random_state=random_state,
-        class_weight="balanced_subsample"
     )
-    rf.fit(X_tr, y_tr)
+    rf.fit(X_sub, y_sub)
 
     print(classification_report(y_val, rf.predict(X_val)))
     return rf
 
 
+
 # 1) Create the dataset with AE features
 dataset = LCAmazon(root="DATA", modality="AE", split="train")
+val_set=LCAmazon(root="DATA", modality="AE", split="val")
 
-# 2) Iterate over the dataset and collect all (img, lbl)
-features_list = []
-labels_list = []
+prop = label_proportions(dataset)
+#2) --- SUBSAMPLING
+# 2.a per-image lookp 
 
-for i in range(len(dataset)):
-    img, lbl = dataset[i]   # img: (64, 47, 47), lbl: (47, 47)
-    img = img.astype(np.float32)           # ensure float32   
-    features_list.append(img)
-    labels_list.append(lbl)
+X_list, y_list = [], []
+rng = np.random.default_rng(10)
+max_pixels_total = 3_000_000
 
-# 3) Stack into arrays suitable for train_rf_per_pixel_many
-features_all = np.stack(features_list, axis=0)   # (N, 64, 47, 47)
-labels_all   = np.stack(labels_list, axis=0)     # (N, 47, 47)
+for i in tqdm(range(len(dataset))):
+    img, lbl = dataset[i]          # img: (47,47,64), lbl: (47,47)
+    img = img.astype(np.float32)
+    C, H, W = img.shape
+    X_img = img.reshape(-1, W)  # (H*W, 64)
+    y_img = lbl.reshape(-1)                              # (H*W,)
 
-# rf = train_rf_per_pixel_many(
-#     features_all,   # (N, 64, 47, 47)
-#     labels_all,     # (N, 47, 47)
-#     ignore_label=None,      # or e.g. 0 or 27 if you want to ignore a class
-#     max_samples=200000,
-#     n_estimators=200,
-#     random_state=10,
-#     n_jobs=-1
-# )
-N = len(features_all)              # e.g. 5000
-rng = np.random.default_rng(10)    # fixed seed for reproducibility
-idx = rng.choice(N, 500, replace=False)  # 500 random image indices
+    n_img = X_img.shape[0]
+    if n_img == 0:
+        continue
 
-features_sub = features_all[idx]   # shape (500, 64, 47, 47)
-labels_sub   = labels_all[idx]     # shape (500, 47, 47)
+    n_take = min(n_img, 500)
+    idx = rng.choice(np.arange(n_img), size=n_take, replace=False)
+    assert y_img.shape[0] == n_img
 
-rf = train_rf_per_pixel_many(
-    features_sub,  # 500 images instead of 5000
-    labels_sub,
-    ignore_label=None,
-    max_samples=50_000,
-    n_estimators=50,
+
+    X_list.append(X_img[idx])
+    y_list.append(y_img[idx])
+
+    #optional hard cap on global size
+    if sum(x.shape[0] for x in X_list) > max_pixels_total:
+        break
+
+X = np.concatenate(X_list, axis=0)
+y = np.concatenate(y_list, axis=0)
+
+print("per image loop sampling done")
+print("X shape:", X.shape, "y shape:", y.shape)
+print(len(np.unique(y)))
+
+#build flat validation data from val_set
+
+
+X_val_list, y_val_list = [], []
+
+for i in tqdm(range(len(val_set))):
+    img_v, lbl_v = val_set[i]   # img_v: (64, 47, 47), lbl_v: (47, 47)
+    img_v = img_v.astype(np.float32)  # ensure float32
+    C, H, W = img_v.shape
+    X_img_v = img_v.reshape(-1, W)
+    y_img_v = lbl_v.reshape(-1)
+
+    X_val_list.append(X_img_v)
+    y_val_list.append(y_img_v)
+
+X_val = np.concatenate(X_val_list, axis=0)
+y_val = np.concatenate(y_val_list, axis=0)
+print("val set extraction done")
+print("X_val shape:", X_val.shape, "y_val shape:", y_val.shape)
+print(np.unique(y_val))
+
+#call RF
+rf = train_rf_from_flat(
+    X, y,
+    X_val, y_val,
+    max_per_class=5000,
+    n_estimators=200,
     random_state=10,
     n_jobs=-1
 )
 
-# import torch
-# import numpy as np
-# from sklearn.ensemble import RandomForestClassifier
-# from sklearn.model_selection import train_test_split
-# from sklearn.metrics import classification_report
-# import joblib  # pip install joblib if not already there
-# from models.lcamazon import LCAmazon
 
+# #TEST
+# # 1) Create test dataset
+# test_set = LCAmazon(root="DATA", modality="AE", split="test")
 
-# def train_rf_per_pixel_many_flat(
-#     X,              # (M, 64)
-#     y,              # (M,)
-#     n_estimators=200,
-#     random_state=10,
-#     n_jobs=-1
-# ):
-#     """
-#     Train a RandomForestClassifier on already-flattened per-pixel data.
-#     X : np.ndarray, shape (M, 64)
-#     y : np.ndarray, shape (M,)
-#     """
+# # 2) Flatten test pixels
+# X_test_list, y_test_list = [], []
 
-#     X = np.asarray(X)
-#     y = np.asarray(y)
+# for i in tqdm(range(len(test_set))):
+#     img_t, lbl_t = test_set[i]      # img_t: (64, 47, 47), lbl_t: (47, 47)
+#     img_t = img_t.astype(np.float32)
+#     C, H, W = img_t.shape
+#     X_img_t = img_t.reshape(-1, W)
+#     y_img_t = lbl_t.reshape(-1)
 
-#     # Train/val split
-#     X_tr, X_val, y_tr, y_val = train_test_split(
-#         X, y, test_size=0.2, random_state=random_state, stratify=y
-#     )
+#     X_test_list.append(X_img_t)
+#     y_test_list.append(y_img_t)
 
-#     print("Total pixels used:", X.shape[0])
-#     print("Unique labels:", np.unique(y, return_counts=True))
+# X_test = np.concatenate(X_test_list, axis=0)
+# y_test = np.concatenate(y_test_list, axis=0)
 
-#     rf = RandomForestClassifier(
-#         n_estimators=n_estimators,
-#         max_depth=None,
-#         n_jobs=n_jobs,
-#         random_state=random_state,
-#         class_weight="balanced_subsample",
-#     )
-#     rf.fit(X_tr, y_tr)
-
-#     print(classification_report(y_val, rf.predict(X_val)))
-#     return rf
-
-
-# # 1) Create the dataset with AE features
-# dataset = LCAmazon(root="DATA", modality="AE", split="train")
-
-# # 2) Iterate over the dataset and collect all (img, lbl)
-# features_list = []
-# labels_list = []
-
-# for i in range(len(dataset)):
-#     img, lbl = dataset[i]   # img: (64, 47, 47), lbl: (47, 47)
-#     img = img.astype(np.float32)   # ensure float32
-#     features_list.append(img)
-#     labels_list.append(lbl)
-
-# # 3) Stack into arrays: (N, 64, 47, 47) and (N, 47, 47)
-# features_all = np.stack(features_list, axis=0)
-# labels_all   = np.stack(labels_list, axis=0)
-
-# # 4) Flatten ALL pixels over ALL images
-# #    (N, 64, 47, 47) -> (N, 47, 47, 64)
-# feats_nhwc = np.transpose(features_all, (0, 2, 3, 1))  # (N, 47, 47, 64)
-
-# N, H, W, C = feats_nhwc.shape  # C should be 64
-
-# # Flatten to (N*H*W, 64) and (N*H*W,)
-# X_all = feats_nhwc.reshape(-1, C)
-# y_all = labels_all.reshape(-1)
-
-# # 5) Optional: drop ignore_label pixels (if you want)
-# ignore_label = None
-# if ignore_label is not None:
-#     mask = (y_all != ignore_label)
-#     X_all = X_all[mask]
-#     y_all = y_all[mask]
-
-# # 6) Uniform random sample of 50 000 pixels from the entire pool
-# max_samples = 50_000
-# rng = np.random.default_rng(10)
-# if X_all.shape[0] > max_samples:
-#     idx = rng.choice(X_all.shape[0], max_samples, replace=False)
-#     X_sub = X_all[idx]
-#     y_sub = y_all[idx]
-# else:
-#     X_sub, y_sub = X_all, y_all
-
-# # 7) Train RF on the sampled pixels
-# rf = train_rf_per_pixel_many_flat(
-#     X_sub,
-#     y_sub,
-#     n_estimators=50,
-#     random_state=10,
-#     n_jobs=-1,
-# )
-
-# joblib.dump(rf, "rf_ae_model.joblib")
-# print("Saved model to rf_ae_model.joblib")
-
+# print("X_test shape:", X_test.shape, "y_test shape:", y_test.shape)
+# y_pred_test = rf.predict(X_test)
+# print("Test accuracy:", accuracy_score(y_test, y_pred_test))
+# print(classification_report(y_test, y_pred_test))
 
 
 
