@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, accuracy_score
 import joblib  # pip install joblib if not already there
 from models.lcamazon import LCAmazon
 from tqdm.auto import tqdm
@@ -66,12 +66,22 @@ def train_rf_from_flat(
         n_estimators=n_estimators,
         max_depth=10,
         n_jobs=n_jobs,
-        #class_weight="balanced_subsample",
+        class_weight="balanced_subsample",
         random_state=random_state,
     )
     rf.fit(X_sub, y_sub)
+    # --- training performance ---
+    y_tr_pred = rf.predict(X_sub)
+    print("=== TRAIN PERFORMANCE ===")
+    print("Train accuracy:", accuracy_score(y_sub, y_tr_pred))
+    print(classification_report(y_sub, y_tr_pred))
 
-    print(classification_report(y_val, rf.predict(X_val)))
+    # --- validation performance ---
+    y_val_pred = rf.predict(X_val)
+    print("=== VAL PERFORMANCE ===")
+    print("Val accuracy:", accuracy_score(y_val, y_val_pred))
+    print(classification_report(y_val, y_val_pred))
+
     return rf
 
 
@@ -144,7 +154,7 @@ rf = train_rf_from_flat(
     X, y,
     X_val, y_val,
     max_per_class=5000,
-    n_estimators=200,
+    n_estimators=150,
     random_state=10,
     n_jobs=-1
 )
