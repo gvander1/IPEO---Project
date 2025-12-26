@@ -8,6 +8,7 @@ from glob import glob
 import math
 import random
 import numpy as np
+from scipy.ndimage import rotate
 
 images_to_discard = np.load("Images_to_discard.npy")
 
@@ -115,11 +116,11 @@ class LCAmazon(Dataset):
         with rasterio.open(img_path) as src:
             img = src.read().astype(np.float32)  # (C, H, W)
 
-    # Read label mask (single channel)
+        # Read label mask (single channel)
         with rasterio.open(lbl_path) as src:
             label = src.read(1).astype(np.int32)
-
-    # If transforms expect (H, W, C), transpose:
+        # la ligne suivante cause une transposition cheloue qui fait qu'on doit à nouveau transposer pour les passer à nos models
+        # If transforms expect (H, W, C), transpose:
         img = np.transpose(img, (1, 2, 0))  # -> (H, W, C)
 
         if self.transforms is not None:
@@ -138,3 +139,18 @@ class LCAmazon(Dataset):
             img, label = self.transforms(img, label)
         return img, label
 """
+
+class RandomRotate:
+    def __init__(self, angles=(0,90,180,270), p=0.5):
+        self.angles = angles
+        self.p = p
+    def __call__(self, img, label):
+        if random.random()>self.p:
+            return img, label
+        else:
+            angle=random.choice(self.angles)
+            #rotating image
+            img = rotate(img, angle, order=1, mode="reflect")
+            #rotating label as well (important !)
+            label = rotate(label, angle, order=0, mode="constant")
+        return img, label

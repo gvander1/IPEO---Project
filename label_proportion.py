@@ -9,7 +9,7 @@ def label_proportions(dataset):
     dataset: e.g. LCAmazon(..., split='train'), where dataset[i] -> (img, lbl)
              and lbl has shape (H, W) with integer class ids.
     """
-    print("---------- Computing proporion of each class in the dataset -----------------")
+    print("---------- Computing proportion of each class in the dataset -----------------")
     all_labels = []
 
     for i in tqdm(range(len(dataset))):
@@ -27,8 +27,9 @@ def label_proportions(dataset):
         "proportion": proportions,
     })
     return df
-
+'''
 train=LCAmazon(root="DATA", modality="s2", split="train")
 test=LCAmazon(root="DATA", modality="s2", split="test")
 val=LCAmazon(root="DATA", modality="s2", split="val")
-print(label_proportions(val))
+print(label_proportions(train))
+'''
