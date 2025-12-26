@@ -15,12 +15,9 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 from torch.optim import SGD
 import os
-'''
-#sanity check
-img, label = train_dataset[0]
-print(np.shape(img))
-'''
-#first create a mask to keep only the indices of images that have lables in classes that are represented in training, validation and test
+
+
+#first create a mask to keep only the indices of images that have labels in classes that are represented in training, validation and test
 d_train = LCAmazon(root="DATA", modality="AE", split="train")
 d_val=LCAmazon(root="DATA", modality="AE", split="val")
 d_test=LCAmazon(root="DATA", modality="AE", split="test")
@@ -288,7 +285,7 @@ def train_epoch(data_loader, model, optimiser, device):
 def validate_epoch(data_loader, model, device):       # note: no optimiser needed
 
   # set model to evaluation mode
-  model.train(False)
+  model.eval()
   model.to(device)
 
   # stats
@@ -349,7 +346,6 @@ batch_size = 2
 learning_rate = 0.1
 weight_decay = 0.001
 num_epochs = 10
-
 
 
 # load model

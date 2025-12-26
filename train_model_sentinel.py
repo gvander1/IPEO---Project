@@ -10,6 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from models.lcamazon import LCAmazon
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
+from label_proportion import label_proportions
 
 #Checking if GPU is available
 if torch.cuda.is_available() == 1:
@@ -19,6 +21,8 @@ else:
 
 train_dataset = LCAmazon(root="DATA", modality="s2", split="train")
 val_dataset = LCAmazon(root="DATA", modality="s2", split="val")
+
+print(label_proportions(train_dataset))
 
 '''
 #sanity check
@@ -153,11 +157,11 @@ def prediction_step(batch, model, device="cuda"):
 
 def train_epoch(train_dl, val_dl, model, optimizer):
     train_losses, train_accuracies, val_losses, val_accuracies = [], [], [], []
-    for batch in train_dl:
+    for batch in tqdm(train_dl):
         loss, accuracy = training_step(batch, model, optimizer)
         train_losses.append(loss.cpu().detach().numpy())
         train_accuracies.append(accuracy)
-    for batch in val_dl:
+    for batch in tqdm(val_dl):
         loss, accuracy = prediction_step(batch, model)
         val_losses.append(loss.cpu().detach().numpy())
         val_accuracies.append(accuracy)
@@ -165,7 +169,7 @@ def train_epoch(train_dl, val_dl, model, optimizer):
     return val_losses, train_losses, val_accuracies, train_accuracies
 
 # Model Training
-num_epochs = 30 #computing 30 epochs takes a while (15 minutes currently), use 3 for debugging
+num_epochs = 3 #computing 30 epochs takes a while (15 minutes currently), use 3 for debugging
 stats = [] #after 30 epochs we reach 85 % accuracy with current hyperparameters, staying at 62% val accuracy (=overfitting !)
 for epoch in range(num_epochs):
     valloss, trainloss, valaccuracy, trainaccuracy = train_epoch(train_dl, val_dl, model, optimizer)

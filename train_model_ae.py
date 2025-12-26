@@ -6,33 +6,7 @@ from sklearn.metrics import classification_report, accuracy_score
 import joblib  # pip install joblib if not already there
 from models.lcamazon import LCAmazon
 from tqdm.auto import tqdm
-import pandas as pd
-
-# create df with class value, nb of pixels and relative proportions
-def label_proportions(dataset):
-    """
-    dataset: e.g. LCAmazon(..., split='train'), where dataset[i] -> (img, lbl)
-             and lbl has shape (H, W) with integer class ids.
-    """
-    all_labels = []
-
-    for i in tqdm(range(len(dataset))):
-        _, lbl = dataset[i]          # ignore image, keep label map
-        all_labels.append(lbl.ravel())
-
-    labels_flat = np.concatenate(all_labels, axis=0)  # shape: (N_pixels,)
-    classes, counts = np.unique(labels_flat, return_counts=True)
-    total = labels_flat.size
-    proportions = counts / total
-
-    df = pd.DataFrame({
-        "class_id": classes,
-        "pixel_count": counts,
-        "proportion": proportions,
-    })
-
-
-    return df
+from label_proportion import label_proportions
 
 
 #Function class aware subsampling + random forest fitting
@@ -90,7 +64,7 @@ def train_rf_from_flat(
 dataset = LCAmazon(root="DATA", modality="AE", split="train")
 val_set=LCAmazon(root="DATA", modality="AE", split="val")
 
-prop = label_proportions(dataset)
+prop = label_proportions(dataset) # variable pas utilisée pour l'instant je crois
 #2) --- SUBSAMPLING
 # 2.a per-image lookp 
 
