@@ -26,7 +26,7 @@ def label_proportions(dataset):
         "pixel_count": counts,
         "proportion": proportions,
     })
-    return df
+    return proportions #returning proportions instead of df
 '''
 train=LCAmazon(root="DATA", modality="s2", split="train")
 test=LCAmazon(root="DATA", modality="s2", split="test")

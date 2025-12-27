@@ -208,6 +208,7 @@ __marimo__/
 
 #files to ignore 
 DATA
+modeloutputs
 
 rf_ae_model.joblib
 rf_ae_model.joblib

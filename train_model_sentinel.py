@@ -8,6 +8,9 @@ import torchvision.transforms as T
 import torch.nn.functional as F
 import torch.nn as nn
 import matplotlib.pyplot as plt
+import rasterio
+import os
+import seaborn as sns
 from models.lcamazon import LCAmazon
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -45,7 +48,7 @@ unnormalize = T.Normalize(-mean * std_inv, std_inv)
 
 #Loading of Computer Vision Models --> using torchvision, choose a fcn resnet50
 from torchvision.models.segmentation import fcn_resnet50
-model = fcn_resnet50(progress=True, num_classes=34)  #we have 13 classes
+model = fcn_resnet50(progress=True, num_classes=13)  #we have 13 classes
 #print(model) #just to see how it is structured
 
 # The resnet18 model is made for 3 bands --> need to change the first convolution layer to fix this
@@ -57,43 +60,31 @@ model.backbone.conv1 = torch.nn.Conv2d(
     padding=3,
     bias=False
 )
-'''
+
 model.classifier = torch.nn.Sequential(
     torch.nn.Conv2d(2048, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False),
     torch.nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-    torch.nn.ReLU(inplace=False),
+#    torch.nn.ReLU(),   #ReLU causes problems in the backward pass because model is in beta stage
     torch.nn.Dropout(p=0.5, inplace=True),
-    torch.nn.Conv2d(512, 38, kernel_size=(1, 1), stride=(1, 1))
+    torch.nn.Conv2d(512, 13, kernel_size=(1, 1), stride=(1, 1))
 )
-'''
+
 #print(model) #see if it worked
-
-
-# need to map labels to indices so they don't overshoot num_classes
-ORIG_IDS = [3, 4, 6, 9, 11, 12, 15, 18, 24, 25, 30, 33]
-ID_TO_IDX = {orig_id: i for i, orig_id in enumerate(ORIG_IDS)}
-IDX_TO_ID = {i: orig_id for i, orig_id in enumerate(ORIG_IDS)}
-def remap_labels_to_indices(target):
-    # target: (B, H, W) with original IDs
-    target_np = target.cpu().numpy()
-    out = np.full_like(target_np, fill_value=-1)
-    for orig_id, idx in ID_TO_IDX.items():
-        out[target_np == orig_id] = idx
-    return torch.from_numpy(out).to(target.device)
-
 
 # Model Training
 # Loss function
-# taking cross-entropy as criterion --> can be edited later
-
+# taking cross-entropy as criterion --> now implementing weighted cross entropy
 from torch.nn import CrossEntropyLoss
+#class_frequency = label_proportions(train_dataset)
+#weights = torch.tensor(1/class_frequency, dtype=torch.float32).to("cuda")  #weights are the inverse of the frequency of class in the dataset
 criterion = CrossEntropyLoss()
 
-# Optimizer (use Stochastic Gradient Descent SGD)
-from torch.optim import SGD
+# Optimizer (use Stochastic Gradient Descent SGD --> actually AdamW is better)
+from torch.optim import AdamW
 
-learning_rate = 0.01
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+learning_rate = 1e-4
+weight_decay = 1e-4
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
 
 def training_step(batch, model, optimizer, device="cuda"):
@@ -107,7 +98,6 @@ def training_step(batch, model, optimizer, device="cuda"):
     x = x.to(device)
     y = y.to(device).long() #the crossentropy loss expects a type long
     #forward pass (i.e prediction)
-#    y = remap_labels_to_indices(y)
     outputs = model(x)
     y_hat = outputs["out"]
     loss = criterion(y_hat, y)
@@ -132,6 +122,7 @@ def prediction_step(batch, model, device="cuda"):
     x, y = batch
     x = x.permute(0, 3, 1, 2) #Putting tensor in right order (Batch, Channel, Height, Width)
     x = normalize(x) #Apply normalization
+    model = model.to(device)
     x = x.to(device)
     y = y.to(device).long() #the crossentropy loss expects a type long
     #forward pass (i.e prediction)
@@ -142,39 +133,121 @@ def prediction_step(batch, model, device="cuda"):
     ground_truth = y.cpu().detach().numpy()
     # accuracy is the mean of correct (1) and incorrect (0) classifications
     accuracy = (predictions == ground_truth).mean()
-    return loss, accuracy
+    # confusion matrix
+    conf_mat = compute_confusion_matrix(predictions, ground_truth, num_classes=13)
+    return loss, accuracy, conf_mat
 
 
 def train_epoch(train_dl, val_dl, model, optimizer):
     train_losses, train_accuracies, val_losses, val_accuracies = [], [], [], []
+    val_confusion = np.zeros((13, 13), dtype=np.int64)
     for batch in tqdm(train_dl):
         loss, accuracy = training_step(batch, model, optimizer)
         train_losses.append(loss.cpu().detach().numpy())
         train_accuracies.append(accuracy)
     for batch in tqdm(val_dl):
-        loss, accuracy = prediction_step(batch, model)
+        loss, accuracy, conf_mat = prediction_step(batch, model)
         val_losses.append(loss.cpu().detach().numpy())
         val_accuracies.append(accuracy)
+        val_confusion += conf_mat
     val_losses, train_losses, val_accuracies, train_accuracies = np.stack(val_losses).mean(), np.stack(train_losses).mean(), np.stack(val_accuracies).mean(), np.stack(train_accuracies).mean()
-    return val_losses, train_losses, val_accuracies, train_accuracies
+    return val_losses, train_losses, val_accuracies, train_accuracies, val_confusion
+
+@torch.no_grad() #without gradients
+def save_predictions(dataset, model, device="cuda"):
+    #we want to save the prediction map of the trained model to plot it later for qualitative assessment
+    model.eval()
+    model.to(device)
+    for idx in tqdm(range(len(dataset)), desc="Saving predictions"):
+        img, _ = dataset[idx]
+        #get original GT path to recover filename + metadata
+        _, gt_path = dataset.samples[idx]
+        fname = os.path.basename(gt_path)
+        out_path = os.path.join("modeloutputs/s2_prediction", fname)
+        #prepare input
+        x = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
+        x = normalize(x)
+        x = x.to(device)
+        #forward pass
+        outputs = model(x)
+        pred = outputs["out"].argmax(1).squeeze(0).cpu().numpy().astype(np.uint8)
+        #read gt metadata
+        with rasterio.open(gt_path) as src:
+            profile = src.profile
+        #update profile for single-band label mask
+        profile.update(
+            dtype=rasterio.uint8,
+            count=1,
+            compress="lzw"
+        )
+        #save prediction
+        with rasterio.open(out_path, "w", **profile) as dst:
+            dst.write(pred, 1)
+
+# Also compute confusion Matrix as important metric
+def compute_confusion_matrix(pred, gt, num_classes):
+    """
+    pred, target: numpy arrays of shape (B, H, W)
+    returns: (num_classes, num_classes) confusion matrix
+    """
+    conf_mat = np.zeros((num_classes, num_classes), dtype=np.int64)
+    pred = pred.reshape(-1)
+    gt = gt.reshape(-1)
+    for gt, p in zip(gt, pred):
+        conf_mat[gt, p] += 1
+    return conf_mat
+
+def per_class_accuracy(conf_mat):
+    correct = np.diag(conf_mat)
+    total = conf_mat.sum(axis=1)
+    acc = correct / np.maximum(total,1)
+    return acc
 
 # Model Training
-num_epochs = 2 #computation time about 30 seconds/epoch
-stats = [] #after 30 epochs we reach 85 % accuracy with current hyperparameters, staying at 62% val accuracy (=overfitting !)
+num_epochs = 7 #computation time about 30 seconds/epoch
+stats = [] #after 30 epochs we reach 93 % train accuracy with current hyperparameters, staying at 62% val accuracy (=overfitting !)
 print("-------------- Training the model and validate it at the same time -------------------")
 for epoch in range(num_epochs):
-    valloss, trainloss, valaccuracy, trainaccuracy = train_epoch(train_dl, val_dl, model, optimizer)
+    valloss, trainloss, valaccuracy, trainaccuracy, val_confusion = train_epoch(train_dl, val_dl, model, optimizer)
     print(f"epoch {epoch}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
     print(f"epoch {epoch}; valloss {valloss:.2f}, val accuracy {valaccuracy*100:.2f}%")
+    print(per_class_accuracy(val_confusion))
     stats.append({
         "trainloss":float(trainloss),
         "trainaccuracy":float(trainaccuracy),
         "valloss":float(valloss),
         "valaccuracy":float(valaccuracy),
+        "valconfusion":val_confusion,
         "epoch":epoch
     })
 
 print(f"-------------- Training done ; number of epochs = {num_epochs} -------------------")
+
+
+# Saving confusion matrix as a heatplot
+conf_mat = stats[-1]["valconfusion"]
+plt.figure(figsize=(10, 8))
+sns.heatmap(
+    conf_mat,
+    cmap="viridis",
+    norm=plt.matplotlib.colors.LogNorm(),
+    xticklabels=False,
+    yticklabels=False
+)
+plt.xlabel("Predicted class")
+plt.ylabel("Ground truth class")
+plt.title("Validation Confusion Matrix (log scale)")
+plt.tight_layout()
+plt.savefig("DATA/results/confusion_matrix.png")
+
+
+
+# Saving prediction maps
+print("Saving training predictions...")
+save_predictions(train_dataset, model)
+print("Predictions saved in modeloutputs/s2_prediction")
+
+
 # Plotting train accuracy as a function of epoch
 trainlosses = np.stack([stat["trainloss"] for stat in stats])
 trainaccuracy = np.stack([stat["trainaccuracy"] for stat in stats])
@@ -201,7 +274,7 @@ plt.savefig("DATA/results/s2_train_val_accuracy.png")
 print("Accuracy figure saved in DATA/results/")
 
 ## IDEAS to improve model accuracy
-# Try Adam or AdamW optimizer
+# Try Adam or AdamW optimizer --> DONE
 # Regularize through Dropouts or Data augmentation (add random rotations) using torchvision.transforms
 # Add a pre-processing conv layer to reduce from 12 to 3 channels
 # Use Weighted Cross-Entropy to deal with class imbalance

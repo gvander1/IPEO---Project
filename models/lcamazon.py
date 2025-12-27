@@ -1,8 +1,5 @@
 from torch.utils.data import Dataset
-
-from PIL import Image
 import rasterio
-
 import os
 from glob import glob
 import math
@@ -13,8 +10,15 @@ from scipy.ndimage import rotate
 images_to_discard = np.load("Images_to_discard.npy")
 
 class LCAmazon(Dataset):
-    # mapping between label class names and indices
-    # based on codigos da legenda.csv file 
+    # first mapping class name with index (for gt)
+    # based on codigos da legenda.csv file (Metadata)
+    # the dictionnary LABEL_CLASSES contains classes that never appear in the dataset (the ones commented out)
+    # there are also classes that don't appear in both the train and dataset:
+        # we disregard class 5 that only appears in the test set
+        # we disregard classes 21 and 29 that only appear in the train set
+
+    # the indices of actually useful classes are therefore uncontiguous (3;4;6;9;11;12;13;14;24;25;30;33) 12 classes in total
+    # we remap them to contiguous indices from 1 to 12 using the dict LABEL_REMAP
     LABEL_CLASSES = {
 #    "Forest": 1, #not in dataset
     "Forest Formation": 3, 
@@ -54,6 +58,7 @@ class LCAmazon(Dataset):
 #    "Aquaculture": 31, #not in dataset
 #    "Not Observed": 27, #not in dataset
 }
+    LABEL_REMAP = {3:1, 4:2, 6:3, 9:4, 11:5, 12:6, 15:7, 18:8, 24:9, 25:10, 30:11, 33:12}
     ID_TO_NAME = {v: k for k, v in LABEL_CLASSES.items()}
     def __init__(self, root, modality="s2", split="train", transforms=None,
                  val_ratio=0.15, seed=42):
@@ -118,7 +123,13 @@ class LCAmazon(Dataset):
 
         # Read label mask (single channel)
         with rasterio.open(lbl_path) as src:
-            label = src.read(1).astype(np.int32)
+            label_raw = src.read(1).astype(np.int32)
+
+        # Remap labels to contiguous indices
+        label = np.zeros_like(label_raw, dtype=np.int32)
+        for old_id, new_id in self.LABEL_REMAP.items():
+            label[label_raw == old_id] = new_id
+
         # la ligne suivante cause une transposition cheloue qui fait qu'on doit à nouveau transposer pour les passer à nos models
         # If transforms expect (H, W, C), transpose:
         img = np.transpose(img, (1, 2, 0))  # -> (H, W, C)
@@ -127,18 +138,7 @@ class LCAmazon(Dataset):
             img, label = self.transforms(img, label)
 
         return img, label
-"""
-    def __getitem__(self, idx):
-        img_path, lbl_path = self.samples[idx]
-        with rasterio.open(img_path) as src:
-            # returns array shape (bands, H, W)
-            img = src.read().astype(np.float32)
-        with rasterio.open(lbl_path) as src:
-            label = src.read(1)  # read single band
-        if self.transforms is not None:
-            img, label = self.transforms(img, label)
-        return img, label
-"""
+
 
 class RandomRotate:
     def __init__(self, angles=(0,90,180,270), p=0.5):
