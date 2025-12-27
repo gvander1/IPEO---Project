@@ -6,5 +6,6 @@ In order to run the code following librairies need to be installed by running fo
 ```bash
 pip install numpy
 pip install torch
+pip install rasterio
 pip install pandas
 pip install seaborn
