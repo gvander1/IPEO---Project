@@ -1,5 +1,8 @@
 # Script training a DL model on the training dataset using the GPU
 # Mainly inspired by the ex8 Jupyter Notebook of the IPEO course
+# Workflow: imports a resnet model, trains it on the train split, then validate it for each epoch
+# After training is done saves the model as a .pth in the folder "models/s2/"
+# To run the trained model on the data, run script called run_model_sentinel.py
 
 import torch
 import matplotlib.pyplot as plt
@@ -14,7 +17,6 @@ import seaborn as sns
 from models.lcamazon import LCAmazon
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from label_proportion import label_proportions
 
 #Checking if GPU is available
 if torch.cuda.is_available() == 1:
@@ -25,14 +27,8 @@ else:
 train_dataset = LCAmazon(root="DATA", modality="s2", split="train")
 val_dataset = LCAmazon(root="DATA", modality="s2", split="val")
 
-'''
-#sanity check
-img, label = train_dataset[0]
-print(np.shape(img))
-'''
-
 #Data Loader
-train_dl = DataLoader(train_dataset, batch_size = 16, num_workers=1)
+train_dl = DataLoader(train_dataset, batch_size=16, num_workers=1)
 val_dl = DataLoader(val_dataset, batch_size=16, num_workers=1)
 
 #for image, label in train_dl:
@@ -40,15 +36,17 @@ val_dl = DataLoader(val_dataset, batch_size=16, num_workers=1)
 #    image has shape [16, 47, 47, 12] label has shape [16, 47, 47]
 
 # Normalization
-mean=torch.tensor([1169.2191,  917.3188,  847.3458,  739.8301, 1033.2438, 1957.2441, 2428.3120, 2375.6396, 2794.8320,  518.3082, 2045.9958, 1027.1027])
-std=torch.tensor([111.8526, 158.9845, 213.6219, 437.9030, 402.8841, 362.7410, 466.6497, 476.7180, 536.5454, 116.5597, 962.3427, 699.4785])
+read=np.load("mean_std/s2.npy")
+mean, std = read[0], read[1]
+mean=torch.tensor(mean)
+std=torch.tensor(std)
 normalize = T.Normalize(mean, std)
-std_inv = 1 / (std + 1e-7)
-unnormalize = T.Normalize(-mean * std_inv, std_inv)
+#std_inv = 1 / (std + 1e-7)
+#unnormalize = T.Normalize(-mean * std_inv, std_inv)
 
 #Loading of Computer Vision Models --> using torchvision, choose a fcn resnet50
 from torchvision.models.segmentation import fcn_resnet50
-model = fcn_resnet50(progress=True, num_classes=13)  #we have 13 classes
+model = fcn_resnet50(progress=True, num_classes=13)  #we have 13 classes (including 0)
 #print(model) #just to see how it is structured
 
 # The resnet18 model is made for 3 bands --> need to change the first convolution layer to fix this
@@ -61,6 +59,8 @@ model.backbone.conv1 = torch.nn.Conv2d(
     bias=False
 )
 
+
+''' uncomment to implement Dropout
 model.classifier = torch.nn.Sequential(
     torch.nn.Conv2d(2048, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False),
     torch.nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
@@ -70,6 +70,8 @@ model.classifier = torch.nn.Sequential(
 )
 
 #print(model) #see if it worked
+'''
+
 
 # Model Training
 # Loss function
@@ -103,11 +105,7 @@ def training_step(batch, model, optimizer, device="cuda"):
     loss = criterion(y_hat, y)
     loss.backward() # backprop
     optimizer.step() # update model param
-    # lets also calculate accuracy for fun
-    # FYI
-    # .cpu() moves the data back to cpu (if on GPU)
-    # .detach() removes gradients (we dont need them for accuracy)
-    # .numpy() converts the tensor to numpy for better handling later
+    #calculate accuracy
     predictions = y_hat.argmax(1).cpu().detach().numpy()
     ground_truth = y.cpu().detach().numpy()
 
@@ -155,7 +153,7 @@ def train_epoch(train_dl, val_dl, model, optimizer):
 
 @torch.no_grad() #without gradients
 def save_predictions(dataset, model, device="cuda"):
-    #we want to save the prediction map of the trained model to plot it later for qualitative assessment
+    #we want to save the prediction maps of the trained model to plot it later for qualitative assessment
     model.eval()
     model.to(device)
     for idx in tqdm(range(len(dataset)), desc="Saving predictions"):
@@ -203,15 +201,19 @@ def per_class_accuracy(conf_mat):
     acc = correct / np.maximum(total,1)
     return acc
 
+def save_model(model, epoch):
+  os.makedirs('models/s2', exist_ok=True)
+  torch.save(model.state_dict(), open(f'models/s2/epoch{epoch}.pth', 'wb'))
+
 # Model Training
 num_epochs = 7 #computation time about 30 seconds/epoch
 stats = [] #after 30 epochs we reach 93 % train accuracy with current hyperparameters, staying at 62% val accuracy (=overfitting !)
 print("-------------- Training the model and validate it at the same time -------------------")
 for epoch in range(num_epochs):
     valloss, trainloss, valaccuracy, trainaccuracy, val_confusion = train_epoch(train_dl, val_dl, model, optimizer)
+    save_model(model, epoch)
     print(f"epoch {epoch}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
     print(f"epoch {epoch}; valloss {valloss:.2f}, val accuracy {valaccuracy*100:.2f}%")
-    print(per_class_accuracy(val_confusion))
     stats.append({
         "trainloss":float(trainloss),
         "trainaccuracy":float(trainaccuracy),
@@ -238,8 +240,8 @@ plt.xlabel("Predicted class")
 plt.ylabel("Ground truth class")
 plt.title("Validation Confusion Matrix (log scale)")
 plt.tight_layout()
-plt.savefig("DATA/results/confusion_matrix.png")
-
+os.makedirs('modeloutputs', exist_ok=True)
+plt.savefig("modeloutputs/confusion_matrix.png")
 
 
 # Saving prediction maps
@@ -248,30 +250,36 @@ save_predictions(train_dataset, model)
 print("Predictions saved in modeloutputs/s2_prediction")
 
 
-# Plotting train accuracy as a function of epoch
+# Plotting accuracy as a function of epoch
 trainlosses = np.stack([stat["trainloss"] for stat in stats])
 trainaccuracy = np.stack([stat["trainaccuracy"] for stat in stats])
 vallosses = np.stack([stat["valloss"] for stat in stats])
 valaccuracy = np.stack([stat["valaccuracy"] for stat in stats])
 epoch = np.stack([stat["epoch"] for stat in stats])
 
-fig, ax1 = plt.subplots()
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+# Accuracy plot
 ax1.plot(epoch, trainaccuracy, label="Train Accuracy", marker='o')
 ax1.plot(epoch, valaccuracy, label="Validation Accuracy", marker='x')
 ax1.set_xlabel("Epoch")
 ax1.set_ylabel("Accuracy")
-ax1.legend()
+ax1.set_title("Accuracy")
 ax1.grid(True)
-ax2 = ax1.twinx()
+ax1.legend()
+# Loss plot
 ax2.plot(epoch, trainlosses, label="Train Loss", marker='o', linestyle='--', color='red')
 ax2.plot(epoch, vallosses, label="Val Loss", marker='x', linestyle='--', color='orange')
+ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Loss")
-lines_1, labels_1 = ax1.get_legend_handles_labels()
-lines_2, labels_2 = ax2.get_legend_handles_labels()
-ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper right")
-plt.title("Training and Validation Accuracy & Loss")
-plt.savefig("DATA/results/s2_train_val_accuracy.png")
-print("Accuracy figure saved in DATA/results/")
+ax2.set_title("Loss")
+ax2.grid(True)
+ax2.legend()
+
+plt.tight_layout()
+os.makedirs('modeloutputs/s2_accuracy', exist_ok=True)
+plt.savefig("modeloutputs/s2_accuracy/s2_train_val_accuracy.png")
+print("Accuracy figure saved in modeloutputs/s2_accuracy/")
+
 
 ## IDEAS to improve model accuracy
 # Try Adam or AdamW optimizer --> DONE

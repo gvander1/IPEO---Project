@@ -40,11 +40,11 @@ Starting with small fully connected convolutional network that does per pixel cl
 
 # @Gaétane je mets ici une fonction qui normalise les images sur chaque channel (hyper important avant de le passer au modèle)
 # Normalization
-#mean=torch.tensor([1169.2191,  917.3188,  847.3458,  739.8301, 1033.2438, 1957.2441, 2428.3120, 2375.6396, 2794.8320,  518.3082, 2045.9958, 1027.1027])
-#std=torch.tensor([111.8526, 158.9845, 213.6219, 437.9030, 402.8841, 362.7410, 466.6497, 476.7180, 536.5454, 116.5597, 962.3427, 699.4785])
-# mean et std sont les moyennes sur chaque band de sentinel 2. Il faut les remplacer par les moyennes de chaque band des AE
-# la fonction que j'ai utilisée pour les calculer est dans run_test-12-12-2025.py il faut l'adapter
-#normalize = T.Normalize(mean, std)
+read=np.load("mean_std/AE.npy")
+mean, std = read[0], read[1]
+mean=torch.tensor(mean)
+std=torch.tensor(std)
+normalize = T.Normalize(mean, std)
 
 
 #MODEL 
@@ -124,7 +124,8 @@ def train_epoch(data_loader, model, optimiser, device):
   for idx, (data, target) in enumerate(tqdm(data_loader)):
 
     data, target = data.to(device), target.to(device)
-    data = data.permute(0, 3, 1, 2).contiguous()
+    data = data.permute(0, 3, 1, 2)
+    data = normalize(data)
 
     # reset gradients
     optimiser.zero_grad()
@@ -193,16 +194,16 @@ def validate_epoch(data_loader, model, device):       # note: no optimiser neede
 
 import glob
 
-os.makedirs('modeloutputs', exist_ok=True)
+os.makedirs('models/AE', exist_ok=True)
 
 def load_model(epoch='latest'):
   model = PerPixelMLPWithContext()
-  modelStates = glob.glob('modeloutputs/*.pth')
+  modelStates = glob.glob('models/AE/*.pth')
   if len(modelStates) and (epoch == 'latest' or epoch > 0):
-    modelStates = [int(m.replace('modeloutputs/','').replace('.pth', '')) for m in modelStates]
+    modelStates = [int(m.replace('models/AE/','').replace('.pth', '')) for m in modelStates]
     if epoch == 'latest':
       epoch = max(modelStates)
-    stateDict = torch.load(open(f'modeloutputs/{epoch}.pth', 'rb'), map_location='cpu')
+    stateDict = torch.load(open(f'models/AE/{epoch}.pth', 'rb'), map_location='cpu')
     model.load_state_dict(stateDict)
   else:
     # fresh model
@@ -211,7 +212,7 @@ def load_model(epoch='latest'):
 
 
 def save_model(model, epoch):
-  torch.save(model.state_dict(), open(f'modeloutputs/{epoch}.pth', 'wb'))
+  torch.save(model.state_dict(), open(f'models/AE/{epoch}.pth', 'wb'))
 
 # define hyperparameters
 start_epoch = 0        # set to 0 to start from scratch again or to 'latest' to continue training from saved checkpoint
