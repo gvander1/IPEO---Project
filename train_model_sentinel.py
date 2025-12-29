@@ -211,7 +211,7 @@ stats = [] #after 30 epochs we reach 93 % train accuracy with current hyperparam
 print("-------------- Training the model and validate it at the same time -------------------")
 for epoch in range(num_epochs):
     valloss, trainloss, valaccuracy, trainaccuracy, val_confusion = train_epoch(train_dl, val_dl, model, optimizer)
-    save_model(model, epoch)
+    #save_model(model, epoch)
     print(f"epoch {epoch}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
     print(f"epoch {epoch}; valloss {valloss:.2f}, val accuracy {valaccuracy*100:.2f}%")
     stats.append({
