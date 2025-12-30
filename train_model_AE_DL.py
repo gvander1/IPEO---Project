@@ -1,261 +1,245 @@
-# Script training a DL model on the training dataset using the GPU
-# Mainly inspired by the ex8 Jupyter Notebook of the IPEO course
-
+import os
+import glob
 import torch
-import matplotlib.pyplot as plt
-import numpy as np
-from tqdm.auto import tqdm
-import torchvision.transforms as T
+import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
-from torch.utils.data import Subset
-from models.lcamazon import LCAmazon
-from torch.utils.data import DataLoader
-import torch.nn as nn
-from torch.optim import SGD
-import os
 import rasterio
+from tqdm.auto import tqdm
+from torch.utils.data import DataLoader, Subset
+import torchvision.transforms as T
+from label_proportion import label_proportions
+from models.lcamazon import LCAmazon
 
-#Checking if GPU is available
-if torch.cuda.is_available() == 1:
-    print("GPU is available")
-else:
-    print("GPU to be started !")
+# Device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Datasets
+d_train = LCAmazon(root="DATA", modality="AE", split="train", aug_geometric=True)
+d_val   = LCAmazon(root="DATA", modality="AE", split="val",   aug_geometric=False)
+d_test  = LCAmazon(root="DATA", modality="AE", split="test",  aug_geometric=False)
 
-d_train = LCAmazon(root="DATA", modality="AE", split="train")
-d_val=LCAmazon(root="DATA", modality="AE", split="val")
-d_test=LCAmazon(root="DATA", modality="AE", split="test")
+# DataLoaders
+batch_size = 16
+train_dl = DataLoader(d_train, batch_size=batch_size, shuffle=True,  num_workers=1)
+val_dl   = DataLoader(d_val,   batch_size=batch_size, shuffle=False, num_workers=1)
 
+# ---------- Class weights (softer, aligned) ----------
+num_classes = 13  # including background 0
+freq = label_proportions(d_train)  # shape (13,)
 
-#Data Loader
-train_dl = DataLoader(d_train, batch_size = 16, shuffle=True, num_workers=1)
-val_dl = DataLoader(d_val, batch_size=16, num_workers=1)
-#Sematic segmentation with deepl learning - model taken from ex 9
-"""
-We need pixel wise classification so semantic segmentation
-Starting with small fully connected convolutional network that does per pixel classification with local context on feature map
-"""
+assert len(freq) == num_classes, f"Expected {num_classes} frequencies, got {len(freq)}"
 
-# @Gaétane je mets ici une fonction qui normalise les images sur chaque channel (hyper important avant de le passer au modèle)
-# Normalization
-read=np.load("mean_std/AE.npy")
+epsilon = 1e-6
+inv_sqrt_freq = 1.0 / np.sqrt(freq + epsilon)
+weights_np = inv_sqrt_freq / inv_sqrt_freq.mean()
+weights_np = np.clip(weights_np, 0.5, 5.0)
+class_weights = torch.tensor(weights_np, dtype=torch.float32, device=device)
+print("Class weights:", class_weights)
+
+# ---------- Normalization ----------
+read = np.load("mean_std/AE.npy")
 mean, std = read[0], read[1]
-mean=torch.tensor(mean)
-std=torch.tensor(std)
+mean = torch.tensor(mean)
+std  = torch.tensor(std)
 normalize = T.Normalize(mean, std)
 
-
-#MODEL 
+# ---------- Model ----------
+#We need pixel wise classification so semantic segmentation
+#Starting with small fully connected convolutional network that does per pixel classification with local context on feature map
 class PerPixelMLPWithContext(nn.Module):
-    def __init__(self, in_channels=64, hidden_dim=128, num_classes=13):
+    def __init__(self, in_channels=64, hidden_dim=256, num_classes=13, p_drop=0.2):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(in_channels, hidden_dim, kernel_size=3, padding=1),  # 3x3 filter size, keeps 47x47 size images - we want to keep the image size as we want one class per pixels
+            nn.Conv2d(in_channels, hidden_dim, 3, padding=1),
             nn.BatchNorm2d(hidden_dim),
             nn.ReLU(inplace=True),
-            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1), #reimbed features into richer feature space ()
+            nn.Dropout2d(p_drop),
+
+            nn.Conv2d(hidden_dim, hidden_dim, 3, padding=1),
             nn.BatchNorm2d(hidden_dim),
             nn.ReLU(inplace=True),
-            nn.Conv2d(hidden_dim, num_classes, kernel_size=1)
+            nn.Dropout2d(p_drop),
+
+            nn.Conv2d(hidden_dim, hidden_dim, 1),
+            nn.BatchNorm2d(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p_drop),
+
+            nn.Conv2d(hidden_dim, num_classes, 1),
         )
 
     def forward(self, x):
-        # x: (B, 64, 47, 47)
-        return self.net(x)  # (B, num_classes, 47, 47)
-    
+        return self.net(x)
 
-train_dl =DataLoader(d_train, batch_size=2,shuffle=True, num_workers=1)
-val_dl =DataLoader(d_val, batch_size=2,shuffle=True, num_workers=1)
+# Note: use hidden_dim=256 as defined above
+model = PerPixelMLPWithContext(in_channels=64, hidden_dim=256, num_classes=13).to(device)
 
-device = torch.device("cuda")
-model = PerPixelMLPWithContext(in_channels=64, hidden_dim=128, num_classes=13).to(device)
+# ---------- Loss and optimiser ----------
+criterion = nn.CrossEntropyLoss(weight=class_weights)  # use weights here
 
-# # One batch from your train_loader
-# data, target = next(iter(dataload_train_test))   # current: (B, H, W, C) from your dataset
-# # If your LCAmazon __getitem__ returns (H, W, C), convert to (B, C, H, W):
-# data = data.permute(0, 3, 1, 2).contiguous()
-# data = data.to(device)
-# model.to(device)
-
-# with torch.no_grad():
-#     logits = model(data)  # now shape (B, num_classes, H, W)
-
-
-# print("Input shape: ", data.shape)
-# print("Logits shape:", logits.shape)
-
-# # Check shape consistency
-# B, C, H, W = data.shape
-# assert logits.shape == (B, 13, H, W), f"Got {logits.shape}, expected {(B, 13, H, W)}"
-
-# # Turn logits into per‑pixel classes
-# pred = logits.argmax(dim=1)              # (B, H, W)
-# # map back to original IDs
-# pred_np = pred.cpu().numpy()
-# pred_ids = np.zeros_like(pred_np)
-# for idx, orig_id in IDX_TO_ID.items():
-#     pred_ids[pred_np == idx] = orig_id
-# print("Pred label map shape:", pred.shape)
-
-# # Optionally check that labels are in range [0, num_classes-1]
-# print("Pred min/max:", pred.min().item(), pred.max().item())
-
-#MODEL TRAINING (taken from exercises)
-criterion = nn.CrossEntropyLoss()
 def setup_optimiser(model, learning_rate, weight_decay):
-  return SGD(
-    model.parameters(),
-    learning_rate,
-    weight_decay
-  )
+    # Adam usually converges better than high‑lr SGD for this setup [web:97][web:109]
+    return torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-
+# ---------- Train / val loops ----------
 def train_epoch(data_loader, model, optimiser, device):
-  model.train()
-  model.to(device)
+    model.train()
+    loss_total = 0.0
+    oa_total = 0.0
 
-  # stats
-  loss_total = 0.0
-  oa_total = 0.0
-
-  # iterate over dataset
-  for idx, (data, target) in enumerate(tqdm(data_loader)):
-
-    data, target = data.to(device), target.to(device)
-    data = data.permute(0, 3, 1, 2)
-    data = normalize(data)
-
-    # reset gradients
-    optimiser.zero_grad()
-
-    # forward pass
-    target = target.long()
-    pred = model(data)
-
-    # loss
-    loss = criterion(pred, target)      # CrossEntropyLoss
-
-    # backward pass
-    loss.backward()
-
-    # parameter update
-    optimiser.step()
-
-    # stats update
-    loss_total += loss.item()
-    oa_total += torch.mean((pred.argmax(1) == target).float()).item()
-
-
-  # normalise stats
-  loss_total /= len(data_loader)
-  oa_total /= len(data_loader)
-
-  return model, loss_total, oa_total
-
-#validation function
-
-def validate_epoch(data_loader, model, device):       # note: no optimiser needed
-
-  # set model to evaluation mode
-  model.eval()
-  model.to(device)
-
-  # stats
-  loss_total = 0.0
-  oa_total = 0.0
-
-  # iterate over dataset
-  for idx, (data, target) in enumerate(tqdm(data_loader)):
-    with torch.no_grad():
-
-      #TODO: likewise, implement the validation routine. This is very similar, but not identical, to the training steps.
-
+    for data, target in tqdm(data_loader):
         data, target = data.to(device), target.to(device)
-        data = data.permute(0, 3, 1, 2).contiguous()
-        pred = model(data)
+        data = data.permute(0, 3, 1, 2)
+        data = normalize(data)
 
-      # forward pass
-        pred = model(data)
+        optimiser.zero_grad()
         target = target.long()
-        loss = criterion(pred, target)      # CrossEntropyLoss
+        pred = model(data)
+        loss = criterion(pred, target)
+        loss.backward()
+        optimiser.step()
 
-      # stats update
         loss_total += loss.item()
         oa_total += torch.mean((pred.argmax(1) == target).float()).item()
 
+    loss_total /= len(data_loader)
+    oa_total /= len(data_loader)
+    return model, loss_total, oa_total
 
-  # normalise stats
-  loss_total /= len(data_loader)
-  oa_total /= len(data_loader)
+def validate_epoch(data_loader, model, device):
+    model.eval()
+    loss_total = 0.0
+    oa_total = 0.0
 
-  return loss_total, oa_total
+    for data, target in tqdm(data_loader):
+        with torch.no_grad():
+            data, target = data.to(device), target.to(device)
+            data = data.permute(0, 3, 1, 2).contiguous()
+            data = normalize(data)
 
-import glob
+            target = target.long()
+            pred = model(data)
+            loss = criterion(pred, target)
 
-os.makedirs('models/AE', exist_ok=True)
+            loss_total += loss.item()
+            oa_total += torch.mean((pred.argmax(1) == target).float()).item()
 
-def load_model(epoch='latest'):
-  model = PerPixelMLPWithContext()
-  modelStates = glob.glob('models/AE/*.pth')
-  if len(modelStates) and (epoch == 'latest' or epoch > 0):
-    modelStates = [int(m.replace('models/AE/','').replace('.pth', '')) for m in modelStates]
-    if epoch == 'latest':
-      epoch = max(modelStates)
-    stateDict = torch.load(open(f'models/AE/{epoch}.pth', 'rb'), map_location='cpu')
+    loss_total /= len(data_loader)
+    oa_total /= len(data_loader)
+    return loss_total, oa_total
+
+# ---------- Checkpointing ----------
+os.makedirs("models/AE", exist_ok=True)
+
+def load_model(epoch="latest"):
+    model = PerPixelMLPWithContext()
+    modelStates = glob.glob("models/AE/*.pth")
+
+    # No checkpoints at all
+    if not modelStates:
+        print("No checkpoints found, returning fresh model.")
+        return model.to(device), 0
+
+    # Handle special 'best' checkpoint
+    if epoch == "best":
+        best_path = "models/AE/best.pth"
+        if os.path.exists(best_path):
+            stateDict = torch.load(best_path, map_location="cpu")
+            model.load_state_dict(stateDict)
+            return model.to(device), "best"
+        else:
+            print("No best.pth found, falling back to latest numeric checkpoint.")
+            epoch = "latest"   # fall through to latest logic
+
+    # For 'latest' or a specific numeric epoch, use numeric filenames only
+    numeric_states = [
+        int(os.path.basename(m).replace(".pth", ""))
+        for m in modelStates
+        if os.path.basename(m).replace(".pth", "").isdigit()
+    ]
+
+    if not numeric_states:
+        print("No numeric checkpoints found, returning fresh model.")
+        return model.to(device), 0
+
+    if epoch == "latest":
+        epoch_to_load = max(numeric_states)
+    else:
+        epoch_to_load = int(epoch)
+
+    path = f"models/AE/{epoch_to_load}.pth"
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Checkpoint {path} does not exist.")
+
+    stateDict = torch.load(path, map_location="cpu")
     model.load_state_dict(stateDict)
-  else:
-    # fresh model
+    return model.to(device), epoch_to_load
+
+
+def save_model(model, epoch, tag=None):
+    if tag is None:
+        path = f"models/AE/{epoch}.pth"
+    else:
+        path = f"models/AE/{tag}.pth"
+    torch.save(model.state_dict(), open(path, "wb"))
+
+# ---------- Hyperparameters ----------
+start_epoch   = 0
+learning_rate = 1e-3        # Adam lr
+weight_decay  = 1e-4
+num_epochs    = 50        # train longer
+patience      = 8           # for early stopping
+
+
+if start_epoch == 0:
+    model = PerPixelMLPWithContext(in_channels=64, hidden_dim=256, num_classes=13).to(device)
     epoch = 0
-  return model, epoch
+else:
+    model, epoch = load_model(epoch=start_epoch)
 
 
-def save_model(model, epoch):
-  torch.save(model.state_dict(), open(f'models/AE/{epoch}.pth', 'wb'))
-
-# define hyperparameters
-start_epoch = 0        # set to 0 to start from scratch again or to 'latest' to continue training from saved checkpoint
-batch_size = 2
-learning_rate = 0.1
-weight_decay = 0.001
-num_epochs = 10
-
-
-# load model
-model, epoch = load_model(epoch=start_epoch)
+# Load / init model and optimiser
 optim = setup_optimiser(model, learning_rate, weight_decay)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optim, mode="min", factor=0.5, patience=3
+)
 
-# do epochs
+best_val_oa = -1.0
+epochs_no_improve = 0
+
+# ---------- Training loop with best‑val checkpoint ----------
 while epoch < num_epochs:
+    model, loss_train, oa_train = train_epoch(train_dl, model, optim, device)
+    loss_val, oa_val = validate_epoch(val_dl, model, device)
+    scheduler.step(loss_val)
 
-  # training
-  model, loss_train, oa_train = train_epoch(train_dl, model, optim, device)
+    print("[Ep. {}/{}] Loss train: {:.2f}, val: {:.2f}; OA train: {:.2f}, val: {:.2f}".format(
+        epoch + 1, num_epochs,
+        loss_train, loss_val,
+        100 * oa_train, 100 * oa_val
+    ))
 
-  # validation
-  loss_val, oa_val = validate_epoch(val_dl, model, device)
+    # Save last epoch
+    save_model(model, epoch + 1)
 
-  # print stats
-  print('[Ep. {}/{}] Loss train: {:.2f}, val: {:.2f}; OA train: {:.2f}, val: {:.2f}'.format(
-      epoch+1, num_epochs,
-      loss_train, loss_val,
-      100*oa_train, 100*oa_val
-  ))
+    # Save best‑validation model
+    if oa_val > best_val_oa:
+        best_val_oa = oa_val
+        epochs_no_improve = 0
+        save_model(model, epoch + 1, tag="best")
+    else:
+        epochs_no_improve += 1
 
-  # save model
-  epoch += 1
-  save_model(model, epoch)
+    if epochs_no_improve >= patience:
+        print(f"Early stopping at epoch {epoch+1}")
+        break
 
+    epoch += 1
 
-
-
-
-
-
-
-
-
-
+# Later, for predictions/visualization, you can load "best" instead of "latest"
+# model, _ = load_model(epoch="best")
 
 # La partie visualisation se fait sur le jupyter notebook "plot.ipynb"
 # J'implémente ici une feature qui permet de sauvegarder les images de prédiction dans modeloutputs/AE_prediction/
@@ -292,8 +276,9 @@ def save_predictions(dataset, model, device="cuda"):
 
 # Saving prediction maps
 os.makedirs("modeloutputs/AE_prediction", exist_ok=True)
-print("Saving training predictions...")
-save_predictions(d_train, model)
+best_model, _ = load_model(epoch="best")
+print("Saving training predictions with best model...")
+save_predictions(d_train, best_model)
 print("Predictions saved in modeloutputs/AE_prediction")
 
 # Il y a encore une erreur dans la ligne 277         pred = model(x).argmax(1).squeeze().cpu().detach().numpy().astype(np.uint8)
@@ -335,6 +320,7 @@ def visualize(dataLoader, epochs, numImages=5):
 # visualize predictions for a number of epochs
 
 # load model states at different epochs
-epochs = [0, 1, 5, 'latest']                                        
-
+epochs = ["best", 1, 5, "latest"]
 visualize(val_dl, epochs, numImages=5)
+
+

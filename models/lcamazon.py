@@ -60,14 +60,27 @@ class LCAmazon(Dataset):
 }
     LABEL_REMAP = {3:1, 4:2, 6:3, 9:4, 11:5, 12:6, 15:7, 18:8, 24:9, 25:10, 30:11, 33:12}
     ID_TO_NAME = {v: k for k, v in LABEL_CLASSES.items()}
-    def __init__(self, root, modality="s2", split="train", transforms=None,
-                 val_ratio=0.15, seed=42):
+    def __init__(self, root, modality="s2", split="train", transforms=None,         
+        aug_geometric=True, # geometric augmentation params
+        p_rotate=0.5,
+        p_hflip=0.5,
+        p_vflip=0.5,
+        angles=(0, 90, 180, 270),
+        val_ratio=0.15, 
+        seed=42):
         """
         split: "train", "val", or "test" ---- modality: "s2" for sentinel "AE" else
         """
         self.transforms = transforms
         self.modality = modality
         self.split = split
+        # geometric augmentation config (only used for split == "train")
+        self.aug_geometric = aug_geometric and (split == "train")
+        self.p_rotate = p_rotate
+        self.p_hflip = p_hflip
+        self.p_vflip = p_vflip
+        self.angles = angles
+
 
         # 1) build all TRAIN samples from filenames train_*.tif
         train_labels = sorted(glob(os.path.join(root, "labels", "train_*.tif")))
@@ -113,6 +126,33 @@ class LCAmazon(Dataset):
 
     def __len__(self):
         return len(self.samples)
+
+    def _apply_geometric_transforms(self, img, label):
+        """
+        img: (H, W, C)
+        label: (H, W)
+        """
+        # Random rotation (nearest for labels, bilinear for image) [web:1][web:5]
+        if random.random() < self.p_rotate:
+            angle = random.choice(self.angles)
+            img = rotate(img, angle, order=1, mode="reflect")
+            label = rotate(label, angle, order=0, mode="constant")
+
+        # Random horizontal flip (axis=1) [web:122][web:129]
+        if random.random() < self.p_hflip:
+            img = np.flip(img, axis=1)
+            label = np.flip(label, axis=1)
+
+        # Random vertical flip (axis=0) [web:122][web:129]
+        if random.random() < self.p_vflip:
+            img = np.flip(img, axis=0)
+            label = np.flip(label, axis=0)
+
+        # Ensure contiguous arrays (np.flip can create negative strides)
+        img = np.ascontiguousarray(img)
+        label = np.ascontiguousarray(label)
+
+        return img, label
 
     def __getitem__(self, idx):
         img_path, lbl_path = self.samples[idx]

@@ -210,6 +210,6 @@ __marimo__/
 DATA/
 modeloutputs/
 models/s2/
-
+model/AE/
 rf_ae_model.joblib
 rf_ae_model.joblib
