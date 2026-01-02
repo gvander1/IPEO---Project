@@ -24,8 +24,8 @@ if torch.cuda.is_available() == 1:
 else:
     print("GPU to be started !")
 
-train_dataset = LCAmazon(root="DATA", modality="s2", split="train")
-val_dataset = LCAmazon(root="DATA", modality="s2", split="val")
+train_dataset = LCAmazon(root="DATA", modality="s2", split="train", aug_geometric=True)
+val_dataset = LCAmazon(root="DATA", modality="s2", split="val", aug_geometric=False)
 
 #Data Loader
 train_dl = DataLoader(train_dataset, batch_size=16, num_workers=1)
@@ -288,3 +288,54 @@ print("Accuracy figure saved in modeloutputs/s2_accuracy/")
 # Use Weighted Cross-Entropy to deal with class imbalance
 #       weights = torch.tensor([1.0, 2.0, 0.5, ...]).to(device)  # adjust per class
 #       criterion = CrossEntropyLoss(weight=weights)
+
+#TEST
+test_dataset = LCAmazon(root="DATA", modality="s2", split="test", aug_geometric=False)
+test_dl = DataLoader(test_dataset, batch_size=16, num_workers=1)
+@torch.no_grad()
+def evaluate_test(test_dl, model, device="cuda"):
+    model.eval()
+    model.to(device)
+    test_losses, test_accuracies = [], []
+    test_confusion = np.zeros((13, 13), dtype=np.int64)
+
+    for batch in tqdm(test_dl, desc="Testing"):
+        x, y = batch
+        x = x.permute(0, 3, 1, 2)
+        x = normalize(x)
+        x = x.to(device)
+        y = y.to(device).long()
+
+        outputs = model(x)
+        y_hat = outputs["out"]
+        loss = criterion(y_hat, y)
+        preds = y_hat.argmax(1).cpu().numpy()
+        gts = y.cpu().numpy()
+
+        test_losses.append(loss.cpu().item())
+        test_accuracies.append((preds == gts).mean())
+        test_confusion += compute_confusion_matrix(preds, gts, num_classes=13)
+
+    test_loss = np.mean(test_losses)
+    test_acc = np.mean(test_accuracies)
+    return test_loss, test_acc, test_confusion
+print("-------------- Evaluating on TEST set -------------------")
+test_loss, test_accuracy, test_confusion = evaluate_test(test_dl, model)
+print(f"Test loss {test_loss:.2f}, test accuracy {test_accuracy*100:.2f}%")
+plt.figure(figsize=(10, 8))
+sns.heatmap(
+    test_confusion,
+    cmap="viridis",
+    norm=plt.matplotlib.colors.LogNorm(),
+    xticklabels=False,
+    yticklabels=False,
+)
+plt.xlabel("Predicted class")
+plt.ylabel("Ground truth class")
+plt.title("Test Confusion Matrix (log scale)")
+plt.tight_layout()
+plt.savefig("modeloutputs/test_confusion_matrix.png")
+print("Test confusion matrix saved as modeloutputs/test_confusion_matrix.png")
+print("Saving TEST predictions...")
+save_predictions(test_dataset, model)
+print("Test predictions saved in modeloutputs/s2_prediction")
