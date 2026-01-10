@@ -6,6 +6,7 @@ import math
 import random
 import numpy as np
 from scipy.ndimage import rotate
+from sklearn.model_selection import KFold
 
 images_to_discard = np.load("Images_to_discard.npy")
 
@@ -67,7 +68,9 @@ class LCAmazon(Dataset):
         p_vflip=0.5,
         angles=(0, 90, 180, 270),
         val_ratio=0.15, 
-        seed=42):
+        seed=42,
+        num_folds=None, # for K-fold cross validation
+        fold_index=None):
         """
         split: "train", "val", or "test" ---- modality: "s2" for sentinel "AE" else
         """
@@ -97,14 +100,24 @@ class LCAmazon(Dataset):
         rnd = random.Random(seed)
         rnd.shuffle(train_samples)
 
-        n_total = len(train_samples)        # should be 5000
-        n_val = int(math.floor(val_ratio * n_total))  # 15%
-        n_train = n_total - n_val
+        # 3) K-fold cross validation
 
-        train_subset = train_samples[:n_train]
-        val_subset   = train_samples[n_train:]
+        if num_folds is not None:
+            assert fold_index is not None, "You must specify fold_index when using num_folds"
+            kf = KFold(n_splits=num_folds, shuffle=True, random_state=seed)
+            folds = list(kf.split(train_samples))
+            train_idx, val_idx = folds[fold_index]
+            train_subset = [train_samples[i] for i in train_idx]
+            val_subset = [train_samples[i] for i in val_idx]
+        else:
+            # standard train/val split
+            n_total = len(train_samples)
+            n_val = int(math.floor(val_ratio * n_total))  # 15%
+            n_train = n_total - n_val
+            train_subset = train_samples[:n_train]
+            val_subset   = train_samples[n_train:]
 
-        # 3) build TEST samples from test_*.tif
+        # 4) build TEST samples from test_*.tif
         test_labels = sorted(glob(os.path.join(root, "labels", "test_*.tif")))
         test_samples = []
         for lbl_path in test_labels:
@@ -177,20 +190,4 @@ class LCAmazon(Dataset):
         if self.transforms is not None:
             img, label = self.transforms(img, label)
 
-        return img, label
-
-
-class RandomRotate:
-    def __init__(self, angles=(0,90,180,270), p=0.5):
-        self.angles = angles
-        self.p = p
-    def __call__(self, img, label):
-        if random.random()>self.p:
-            return img, label
-        else:
-            angle=random.choice(self.angles)
-            #rotating image
-            img = rotate(img, angle, order=1, mode="reflect")
-            #rotating label as well (important !)
-            label = rotate(label, angle, order=0, mode="constant")
         return img, label

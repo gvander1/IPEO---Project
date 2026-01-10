@@ -25,7 +25,7 @@ batch_size = 16
 train_dl = DataLoader(d_train, batch_size=batch_size, shuffle=True,  num_workers=1)
 val_dl   = DataLoader(d_val,   batch_size=batch_size, shuffle=False, num_workers=1)
 
-# ---------- Class weights (softer, aligned) ----------
+# ---------- Class weights ----------
 num_classes = 13  # including background 0
 freq = label_proportions(d_train)  # shape (13,)
 

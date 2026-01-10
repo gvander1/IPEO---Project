@@ -41,8 +41,6 @@ mean, std = read[0], read[1]
 mean=torch.tensor(mean)
 std=torch.tensor(std)
 normalize = T.Normalize(mean, std)
-#std_inv = 1 / (std + 1e-7)
-#unnormalize = T.Normalize(-mean * std_inv, std_inv)
 
 #Loading of Computer Vision Models --> using torchvision, choose a fcn resnet50
 from torchvision.models.segmentation import fcn_resnet50
@@ -77,9 +75,10 @@ model.classifier = torch.nn.Sequential(
 # Loss function
 # taking cross-entropy as criterion --> now implementing weighted cross entropy
 from torch.nn import CrossEntropyLoss
-#class_frequency = label_proportions(train_dataset)
-#weights = torch.tensor(1/class_frequency, dtype=torch.float32).to("cuda")  #weights are the inverse of the frequency of class in the dataset
-criterion = CrossEntropyLoss()
+class_frequency = np.load("class_frequency.npy")
+print(class_frequency)
+weights = torch.tensor(1/np.sqrt(class_frequency), dtype=torch.float32).to("cuda")  #weights are the inverse of the square root of the frequency of class in the dataset
+criterion = CrossEntropyLoss(weight=weights)
 
 # Optimizer (use Stochastic Gradient Descent SGD --> actually AdamW is better)
 from torch.optim import AdamW
@@ -206,22 +205,29 @@ def save_model(model, epoch):
   torch.save(model.state_dict(), open(f'models/s2/epoch{epoch}.pth', 'wb'))
 
 # Model Training
-num_epochs = 7 #computation time about 30 seconds/epoch
+num_folds = 5
+num_epochs = 5 #computation time about 30 seconds/epoch
 stats = [] #after 30 epochs we reach 93 % train accuracy with current hyperparameters, staying at 62% val accuracy (=overfitting !)
 print("-------------- Training the model and validate it at the same time -------------------")
-for epoch in range(num_epochs):
-    valloss, trainloss, valaccuracy, trainaccuracy, val_confusion = train_epoch(train_dl, val_dl, model, optimizer)
-    #save_model(model, epoch)
-    print(f"epoch {epoch}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
-    print(f"epoch {epoch}; valloss {valloss:.2f}, val accuracy {valaccuracy*100:.2f}%")
-    stats.append({
-        "trainloss":float(trainloss),
-        "trainaccuracy":float(trainaccuracy),
-        "valloss":float(valloss),
-        "valaccuracy":float(valaccuracy),
-        "valconfusion":val_confusion,
-        "epoch":epoch
-    })
+for fold in range(num_folds):
+    for epoch in range(num_epochs):
+        train_set = LCAmazon(root="DATA", split="train", aug_geometric=True, num_folds=num_folds, fold_index=fold)
+        val_set = LCAmazon(root="DATA", split="val", num_folds=num_folds, fold_index=fold)
+        # build dataloaders
+        train_dl = DataLoader(train_set, batch_size=8, shuffle=True)
+        val_dl = DataLoader(val_set, batch_size=8)
+        valloss, trainloss, valaccuracy, trainaccuracy, val_confusion = train_epoch(train_dl, val_dl, model, optimizer)
+        #save_model(model, epoch)
+        print(f"epoch {epoch}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
+        print(f"epoch {epoch}; valloss {valloss:.2f}, val accuracy {valaccuracy*100:.2f}%")
+        stats.append({
+            "trainloss":float(trainloss),
+            "trainaccuracy":float(trainaccuracy), 
+            "valloss":float(valloss),
+            "valaccuracy":float(valaccuracy),
+            "valconfusion":val_confusion,
+            "epoch":epoch
+        })
 
 print(f"-------------- Training done ; number of epochs = {num_epochs} -------------------")
 
