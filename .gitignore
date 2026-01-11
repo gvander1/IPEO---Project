@@ -210,6 +210,7 @@ __marimo__/
 DATA/
 modeloutputs/
 models/s2/
-model/AE/
+models/AE_new/
+models/__pycache__
 rf_ae_model.joblib
 rf_ae_model.joblib

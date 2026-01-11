@@ -1,8 +1,7 @@
 # Script training a DL model on the training dataset using the GPU
 # Mainly inspired by the ex8 Jupyter Notebook of the IPEO course
 # Workflow: imports a resnet model, trains it on the train split, then validate it for each epoch
-# After training is done saves the model as a .pth in the folder "models/s2/"
-# To run the trained model on the data, run script called run_model_sentinel.py
+# After training is done saves the model as a .pth in the folder "models/AE_new/"
 
 import torch
 import matplotlib.pyplot as plt
@@ -24,8 +23,8 @@ if torch.cuda.is_available() == 1:
 else:
     print("GPU to be started !")
 
-train_dataset = LCAmazon(root="DATA", modality="s2", split="train", aug_geometric=True)
-val_dataset = LCAmazon(root="DATA", modality="s2", split="val", aug_geometric=False)
+train_dataset = LCAmazon(root="DATA", modality="AE", split="train", aug_geometric=True)
+val_dataset = LCAmazon(root="DATA", modality="AE", split="val", aug_geometric=False)
 
 #Data Loader
 train_dl = DataLoader(train_dataset, batch_size=16, num_workers=1)
@@ -36,7 +35,7 @@ val_dl = DataLoader(val_dataset, batch_size=16, num_workers=1)
 #    image has shape [16, 47, 47, 12] label has shape [16, 47, 47]
 
 # Normalization
-read=np.load("mean_std/s2.npy")
+read=np.load("mean_std/AE.npy")
 mean, std = read[0], read[1]
 mean=torch.tensor(mean)
 std=torch.tensor(std)
@@ -49,7 +48,7 @@ model = fcn_resnet50(progress=True, num_classes=13)  #we have 13 classes (includ
 
 # The resnet18 model is made for 3 bands --> need to change the first convolution layer to fix this
 model.backbone.conv1 = torch.nn.Conv2d(
-    in_channels=12,
+    in_channels=64, #64 in channels
     out_channels=64,
     kernel_size=7,
     stride=2,
@@ -82,7 +81,7 @@ criterion = CrossEntropyLoss(weight=weights)
 # Optimizer (use Stochastic Gradient Descent SGD --> actually AdamW is better)
 from torch.optim import AdamW
 
-learning_rate = 1e-4
+learning_rate = 1e-3
 weight_decay = 1e-4
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
@@ -149,6 +148,7 @@ def train_epoch(train_dl, val_dl, model, optimizer):
     val_losses, train_losses, val_accuracies, train_accuracies = np.stack(val_losses).mean(), np.stack(train_losses).mean(), np.stack(val_accuracies).mean(), np.stack(train_accuracies).mean()
     return val_losses, train_losses, val_accuracies, train_accuracies, val_confusion
 
+os.makedirs('modeloutputs/AE_prediction_new', exist_ok=True)
 @torch.no_grad() #without gradients
 def save_predictions(dataset, model, device="cuda"):
     #we want to save the prediction maps of the trained model to plot it later for qualitative assessment
@@ -159,7 +159,7 @@ def save_predictions(dataset, model, device="cuda"):
         #get original GT path to recover filename + metadata
         _, gt_path = dataset.samples[idx]
         fname = os.path.basename(gt_path)
-        out_path = os.path.join("modeloutputs/s2_prediction", fname)
+        out_path = os.path.join("modeloutputs/AE_prediction_new", fname)
         #prepare input
         x = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
         x = normalize(x)
@@ -200,8 +200,8 @@ def per_class_accuracy(conf_mat):
     return acc
 
 def save_model(model, epoch, fold):
-  os.makedirs('models/s2', exist_ok=True)
-  torch.save(model.state_dict(), open(f'models/s2/epoch{epoch}_fold{fold}.pth', 'wb'))
+  os.makedirs('models/AE_new', exist_ok=True)
+  torch.save(model.state_dict(), open(f'models/AE_new/epoch{epoch}_fold{fold}.pth', 'wb'))
 
 # Model Training
 num_folds = 5
@@ -212,13 +212,12 @@ for i in range(num_folds):
 print("-------------- Training the model and validate it at the same time -------------------")
 for fold in range(num_folds):
     for epoch in range(num_epochs):
-        train_set = LCAmazon(root="DATA", split="train", aug_geometric=True, num_folds=num_folds, fold_index=fold)
-        val_set = LCAmazon(root="DATA", split="val", num_folds=num_folds, fold_index=fold)
+        train_set = LCAmazon(root="DATA", split="train", modality = "AE", aug_geometric=True, num_folds=num_folds, fold_index=fold)
+        val_set = LCAmazon(root="DATA", split="val", modality = "AE", num_folds=num_folds, fold_index=fold)
         # build dataloaders
-        train_dl = DataLoader(train_set, batch_size=8, shuffle=True)
-        val_dl = DataLoader(val_set, batch_size=8)
+        train_dl = DataLoader(train_set, batch_size=16, shuffle=True)
+        val_dl = DataLoader(val_set, batch_size=16)
         valloss, trainloss, valaccuracy, trainaccuracy, val_confusion = train_epoch(train_dl, val_dl, model, optimizer)
-        #save_model(model, epoch)
         print(f"fold {fold+1}; epoch {epoch}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
         print(f"fold {fold+1}; epoch {epoch}; valloss {valloss:.2f}, val accuracy {valaccuracy*100:.2f}%")
         stats[fold].append({
@@ -248,14 +247,14 @@ plt.xlabel("Predicted class")
 plt.ylabel("Ground truth class")
 plt.title("Validation Confusion Matrix (log scale)")
 plt.tight_layout()
-os.makedirs('modeloutputs', exist_ok=True)
-plt.savefig("modeloutputs/confusion_matrix.png")
+os.makedirs('modeloutputs/AE_metrics', exist_ok=True)
+plt.savefig("modeloutputs/AE_metrics/confusion_matrix.png")
 
 
 # Saving prediction maps
 print("Saving training predictions...")
 save_predictions(train_dataset, model)
-print("Predictions saved in modeloutputs/s2_prediction")
+print("Predictions saved in modeloutputs/AE_prediction_new")
 
 
 # Plotting accuracy as a function of epoch
@@ -285,9 +284,9 @@ for fold in range(num_folds):
     ax2.legend()
 
     plt.tight_layout()
-    os.makedirs('modeloutputs/s2_accuracy', exist_ok=True)
-    plt.savefig(f"modeloutputs/s2_accuracy/s2_train_val_accuracy_fold{fold+1}.png")
-    print("Accuracy figure saved in modeloutputs/s2_accuracy/")
+    os.makedirs('modeloutputs/AE_accuracy/', exist_ok=True)
+    plt.savefig(f"modeloutputs/AE_accuracy/AE_train_val_accuracy_fold{fold+1}.png")
+    print("Accuracy figure saved in modeloutputs/AE_accuracy/")
 
 
 ## IDEAS to improve model accuracy
@@ -299,7 +298,7 @@ for fold in range(num_folds):
 #       criterion = CrossEntropyLoss(weight=weights)
 
 #TEST
-test_dataset = LCAmazon(root="DATA", modality="s2", split="test", aug_geometric=False)
+test_dataset = LCAmazon(root="DATA", modality="AE", split="test", aug_geometric=False)
 test_dl = DataLoader(test_dataset, batch_size=16, num_workers=1)
 @torch.no_grad()
 def evaluate_test(test_dl, model, device="cuda"):
@@ -343,8 +342,8 @@ plt.xlabel("Predicted class")
 plt.ylabel("Ground truth class")
 plt.title("Test Confusion Matrix (log scale)")
 plt.tight_layout()
-plt.savefig("modeloutputs/test_confusion_matrix.png")
-print("Test confusion matrix saved as modeloutputs/test_confusion_matrix.png")
+plt.savefig("modeloutputs/AE_metrics/test_confusion_matrix.png")
+print("Test confusion matrix saved as modeloutputs/AE_metrics/test_confusion_matrix.png")
 print("Saving TEST predictions...")
 save_predictions(test_dataset, model)
-print("Test predictions saved in modeloutputs/s2_prediction")
+print("Test predictions saved in modeloutputs/AE_prediction_new")

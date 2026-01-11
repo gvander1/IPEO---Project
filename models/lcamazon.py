@@ -83,7 +83,7 @@ class LCAmazon(Dataset):
         self.p_hflip = p_hflip
         self.p_vflip = p_vflip
         self.angles = angles
-
+        
 
         # 1) build all TRAIN samples from filenames train_*.tif
         train_labels = sorted(glob(os.path.join(root, "labels", "train_*.tif")))
@@ -187,6 +187,10 @@ class LCAmazon(Dataset):
         # If transforms expect (H, W, C), transpose:
         img = np.transpose(img, (1, 2, 0))  # -> (H, W, C)
 
+        # Apply geometric augmentation
+        if self.aug_geometric: #if the arugment is True
+            img, label = self._apply_geometric_transforms(img, label)
+        # Apply optional external transforms
         if self.transforms is not None:
             img, label = self.transforms(img, label)
 
