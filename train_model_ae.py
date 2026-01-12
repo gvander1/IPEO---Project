@@ -18,7 +18,7 @@ def train_rf_from_flat(
     n_estimators=200,
     random_state=10,
     n_jobs=-1,
-    max_depth=12,
+    max_depth=None,
     min_samples_leaf=1,
     class_weight=None,
 ):
