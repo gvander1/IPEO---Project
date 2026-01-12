@@ -8,7 +8,7 @@ import numpy as np
 from scipy.ndimage import rotate
 from sklearn.model_selection import KFold
 
-images_to_discard = np.load("Images_to_discard.npy")
+images_to_discard = set(np.load("Images_to_discard.npy"))
 
 class LCAmazon(Dataset):
     # first mapping class name with index (for gt)
@@ -134,6 +134,8 @@ class LCAmazon(Dataset):
             self.samples = val_subset
         elif split == "test":
             self.samples = test_samples
+        elif split == "train_all":
+            self.samples = train_samples
         else:
             raise ValueError("split must be 'train', 'val', or 'test'")
 

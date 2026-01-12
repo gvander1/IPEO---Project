@@ -57,20 +57,6 @@ model.backbone.conv1 = torch.nn.Conv2d(
     bias=False
 )
 
-
-''' uncomment to implement Dropout
-model.classifier = torch.nn.Sequential(
-    torch.nn.Conv2d(2048, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False),
-    torch.nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-#    torch.nn.ReLU(),   #ReLU causes problems in the backward pass because model is in beta stage
-    torch.nn.Dropout(p=0.5, inplace=True),
-    torch.nn.Conv2d(512, 13, kernel_size=(1, 1), stride=(1, 1))
-)
-
-#print(model) #see if it worked
-'''
-
-
 # Model Training
 # Loss function
 # taking cross-entropy as criterion --> now implementing weighted cross entropy

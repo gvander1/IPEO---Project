@@ -24,4 +24,5 @@ for lbl_path in label_paths:
             image_to_discard.append(os.path.basename(lbl_path))
 
 image_to_discard= np.array(image_to_discard)
+print("Images to discard saved in Images_to_discard.npy")
 np.save("Images_to_discard.npy", image_to_discard)
