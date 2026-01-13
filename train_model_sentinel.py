@@ -59,7 +59,7 @@ model.backbone.conv1 = torch.nn.Conv2d(
 
 # Model Training
 # Loss function
-# taking cross-entropy as criterion --> now implementing weighted cross entropy
+# taking weighted cross-entropy with w(class)=1/sqrt(freq(class)) as criterion
 from torch.nn import CrossEntropyLoss
 class_frequency = np.load("class_frequency.npy")
 weights = torch.tensor(1/np.sqrt(class_frequency), dtype=torch.float32).to("cuda")  #weights are the inverse of the square root of the frequency of class in the dataset

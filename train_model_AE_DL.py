@@ -9,7 +9,6 @@ import rasterio
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader, Subset
 import torchvision.transforms as T
-from label_proportion import label_proportions
 from models.lcamazon import LCAmazon
 
 # Device
@@ -25,18 +24,6 @@ batch_size = 16
 train_dl = DataLoader(d_train, batch_size=batch_size, shuffle=True,  num_workers=1)
 val_dl   = DataLoader(d_val,   batch_size=batch_size, shuffle=False, num_workers=1)
 
-# ---------- Class weights ----------
-num_classes = 13  # including background 0
-freq = label_proportions(d_train)  # shape (13,)
-
-assert len(freq) == num_classes, f"Expected {num_classes} frequencies, got {len(freq)}"
-
-epsilon = 1e-6
-inv_sqrt_freq = 1.0 / np.sqrt(freq + epsilon)
-weights_np = inv_sqrt_freq / inv_sqrt_freq.mean()
-weights_np = np.clip(weights_np, 0.5, 5.0)
-class_weights = torch.tensor(weights_np, dtype=torch.float32, device=device)
-print("Class weights:", class_weights)
 
 # ---------- Normalization ----------
 read = np.load("mean_std/AE.npy")
@@ -73,11 +60,14 @@ class PerPixelMLPWithContext(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-# Note: use hidden_dim=256 as defined above
 model = PerPixelMLPWithContext(in_channels=64, hidden_dim=256, num_classes=13).to(device)
 
-# ---------- Loss and optimiser ----------
-criterion = nn.CrossEntropyLoss(weight=class_weights)  # use weights here
+# Loss function
+# taking weighted cross-entropy with w(class)=1/sqrt(freq(class)) as criterion
+from torch.nn import CrossEntropyLoss
+class_frequency = np.load("class_frequency.npy")
+weights = torch.tensor(1/np.sqrt(class_frequency), dtype=torch.float32).to("cuda")  #weights are the inverse of the square root of the frequency of class in the dataset
+criterion = CrossEntropyLoss(weight=weights)
 
 def setup_optimiser(model, learning_rate, weight_decay):
     # Adam usually converges better than high‑lr SGD for this setup [web:97][web:109]
@@ -184,6 +174,7 @@ def save_model(model, epoch, tag=None):
     else:
         path = f"models/AE/{tag}.pth"
     torch.save(model.state_dict(), open(path, "wb"))
+
 
 # ---------- Hyperparameters ----------
 start_epoch   = 0

@@ -1,4 +1,7 @@
-import torch
+# Script training a Random Forest on a subsample of pixels
+# A limited number of pixels is taken for each class to deal with class imbalance
+
+import os
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -6,7 +9,6 @@ from sklearn.metrics import classification_report, accuracy_score
 import joblib  # pip install joblib if not already there
 from models.lcamazon import LCAmazon
 from tqdm.auto import tqdm
-from label_proportion import label_proportions
 from sklearn.preprocessing import StandardScaler
 
 #Function class aware subsampling + random forest fitting
@@ -48,6 +50,7 @@ def train_rf_from_flat(
         random_state=random_state,
     )
     rf.fit(X_sub, y_sub)
+    
     # --- training performance ---
     y_tr_pred = rf.predict(X_sub)
     print("=== TRAIN PERFORMANCE ===")
@@ -59,7 +62,7 @@ def train_rf_from_flat(
     print("=== VAL PERFORMANCE ===")
     print("Val accuracy:", accuracy_score(y_val, y_val_pred))
     print(classification_report(y_val, y_val_pred))
-
+    
     return rf
 
 
@@ -70,10 +73,8 @@ dataset = LCAmazon(root="DATA", modality="AE", split="train")
 val_set=LCAmazon(root="DATA", modality="AE", split="val")
 
 
-prop = label_proportions(dataset) # variable pas utilisée pour l'instant je crois
-
 #2) --- SUBSAMPLING
-# 2.a per-image lookp 
+# 2.a per-image loop 
 
 X_list, y_list = [], []
 rng = np.random.default_rng(10)
@@ -146,12 +147,18 @@ rf = train_rf_from_flat(
     n_jobs=-1
 )
 
-
+# Saving the model to evaluate it later in metrics.py
+os.makedirs("models/AE_RF", exist_ok=True)
+joblib.dump(rf, "models/AE_RF/rf_model.pkl")
+joblib.dump(scaler, "models/AE_RF/scaler.pkl")
+    
+    
+'''
 #TEST
 # 1) Create test dataset
 test_set = LCAmazon(root="DATA", modality="AE", split="test")
 # Later for test:
-proptest= label_proportions(test_set)
+#proptest= label_proportions(test_set)
 
 # 2) Flatten test pixels
 X_test_list, y_test_list = [], []
@@ -178,3 +185,4 @@ print(classification_report(y_test, y_pred_test))
 
 
 
+'''

@@ -211,6 +211,7 @@ DATA/
 modeloutputs/
 models/s2/
 models/AE_new/
+models/AE_RF/
 models/__pycache__
 rf_ae_model.joblib
 rf_ae_model.joblib
