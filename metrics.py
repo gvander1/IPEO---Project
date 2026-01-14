@@ -178,7 +178,7 @@ def save_metrics(conf_mat, modality ="s2", split="non-specified"):
         transform=plt.gca().transAxes, fontsize=12, verticalalignment='center')
     plt.tight_layout()
     os.makedirs('modeloutputs/metrics', exist_ok=True)
-    plt.savefig(f"modeloutputs/metrics/{modality}_{split}_confusion_matrix_.png", dpi=300)
+    plt.savefig(f"modeloutputs/metrics/{modality}_{split}_confusion_matrix_20epochs.png", dpi=300)
     plt.close()
 
 
@@ -186,7 +186,6 @@ def save_metrics(conf_mat, modality ="s2", split="non-specified"):
 # Loading models
 # Trained Sentinel-2 Model
 def load_model_sentinel(model_path):
-    print("test")
     from torchvision.models.segmentation import fcn_resnet50
     model_s2 = fcn_resnet50(progress=True, num_classes=13)  #we have 13 classes (including 0)
     # The resnet18 model is made for 3 bands --> need to change the first convolution layer to fix this
@@ -241,7 +240,7 @@ def load_model_AE_RF():
     return(rf, scaler)
 
 # Load models
-model_s2=load_model_sentinel("models/s2/best.pth")
+model_s2=load_model_sentinel("models/trained_models_dump/Sentinel-folds-20epoch.pth")
 model_AE=load_model_AE("models/AE/best.pth")
 rf, scaler=load_model_AE_RF()
 
@@ -252,7 +251,7 @@ test_dataset_s2=LCAmazon(root="DATA", modality="s2", split="test") #Images the m
 # AE
 dataset_AE=LCAmazon(root="DATA", modality="AE", split="train_all", aug_geometric=False) #All train images the models have seen
 test_dataset_AE=LCAmazon(root="DATA", modality="AE", split="test") #Images the model has never seen before
-'''
+
 conf_mat_s2=forward_pass(dataset_s2, model_s2, modality="s2", split="train_all")
 conf_mat_AE=forward_pass(dataset_AE, model_AE, modality ="AE", split="train_all")
 test_conf_mat_s2=forward_pass(test_dataset_s2, model_s2, modality="s2", split="test")
@@ -260,14 +259,15 @@ test_conf_mat_AE=forward_pass(test_dataset_AE, model_AE, modality ="AE", split="
 
 # Save metrics
 save_metrics(conf_mat_s2, modality="s2", split="train_all")
-save_metrics(conf_mat_AE, modality="AE", split="train_all")
+#save_metrics(conf_mat_AE, modality="AE", split="train_all")
 save_metrics(test_conf_mat_s2, modality="s2", split="test")
-save_metrics(test_conf_mat_AE, modality="AE", split="test")
+#save_metrics(test_conf_mat_AE, modality="AE", split="test")
+
+
+
 '''
-
-
-
 conf_mat_AE_RF=random_forest_eval(dataset_AE, rf, scaler, split="train_all")
 test_conf_mat_AE_RF=random_forest_eval(test_dataset_AE, rf, scaler, split="test")
 save_metrics(conf_mat_AE_RF, modality="AE_RF", split="train_all")
 save_metrics(test_conf_mat_AE_RF, modality="AE_RF", split="test")
+'''
