@@ -74,7 +74,7 @@ def setup_optimiser(model, learning_rate, weight_decay):
     return torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
 # ---------- Train / val loops ----------
-def train_epoch(data_loader, model, optimiser, device):
+def train_epoch(data_loader, model, optimiser, device="cuda"):
     model.train()
     loss_total = 0.0
     oa_total = 0.0
@@ -96,9 +96,9 @@ def train_epoch(data_loader, model, optimiser, device):
 
     loss_total /= len(data_loader)
     oa_total /= len(data_loader)
-    return model, loss_total, oa_total
+    return loss_total, oa_total
 
-def validate_epoch(data_loader, model, device):
+def validate_epoch(data_loader, model, device="cuda"):
     model.eval()
     loss_total = 0.0
     oa_total = 0.0
@@ -120,198 +120,79 @@ def validate_epoch(data_loader, model, device):
     oa_total /= len(data_loader)
     return loss_total, oa_total
 
-# ---------- Checkpointing ----------
-os.makedirs("models/AE", exist_ok=True)
 
-def load_model(epoch="latest"):
-    model = PerPixelMLPWithContext()
-    modelStates = glob.glob("models/AE/*.pth")
-
-    # No checkpoints at all
-    if not modelStates:
-        print("No checkpoints found, returning fresh model.")
-        return model.to(device), 0
-
-    # Handle special 'best' checkpoint
-    if epoch == "best":
-        best_path = "models/AE/best.pth"
-        if os.path.exists(best_path):
-            stateDict = torch.load(best_path, map_location="cpu")
-            model.load_state_dict(stateDict)
-            return model.to(device), "best"
-        else:
-            print("No best.pth found, falling back to latest numeric checkpoint.")
-            epoch = "latest"   # fall through to latest logic
-
-    # For 'latest' or a specific numeric epoch, use numeric filenames only
-    numeric_states = [
-        int(os.path.basename(m).replace(".pth", ""))
-        for m in modelStates
-        if os.path.basename(m).replace(".pth", "").isdigit()
-    ]
-
-    if not numeric_states:
-        print("No numeric checkpoints found, returning fresh model.")
-        return model.to(device), 0
-
-    if epoch == "latest":
-        epoch_to_load = max(numeric_states)
-    else:
-        epoch_to_load = int(epoch)
-
-    path = f"models/AE/{epoch_to_load}.pth"
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Checkpoint {path} does not exist.")
-
-    stateDict = torch.load(path, map_location="cpu")
-    model.load_state_dict(stateDict)
-    return model.to(device), epoch_to_load
-
-
-def save_model(model, epoch, tag=None):
-    if tag is None:
-        path = f"models/AE/{epoch}.pth"
-    else:
-        path = f"models/AE/{tag}.pth"
-    torch.save(model.state_dict(), open(path, "wb"))
+def save_model(model, epoch, fold):
+    os.makedirs('models/AE_final', exist_ok=True)
+    torch.save(model.state_dict(), open(f'models/AE_final/fold{fold+1}_epoch{epoch+1}.pth', 'wb'))
 
 
 # ---------- Hyperparameters ----------
-start_epoch   = 0
-learning_rate = 1e-3        # Adam lr
+learning_rate = 1e-4        # Adam lr
 weight_decay  = 1e-4
-num_epochs    = 50        # train longer
-patience      = 8           # for early stopping
-
-
-if start_epoch == 0:
-    model = PerPixelMLPWithContext(in_channels=64, hidden_dim=256, num_classes=13).to(device)
-    epoch = 0
-else:
-    model, epoch = load_model(epoch=start_epoch)
+num_epochs    = 20        # train longer
 
 
 # Load / init model and optimiser
-optim = setup_optimiser(model, learning_rate, weight_decay)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    optim, mode="min", factor=0.5, patience=3
-)
+optimizer = setup_optimiser(model, learning_rate, weight_decay)
 
-best_val_oa = -1.0
-epochs_no_improve = 0
+# Model Training
+num_folds = 5
+num_epochs = 20 #computation time about 43 seconds/epoch
+stats = []
+for i in range(num_folds):
+    stats.append([])
+print("-------------- Training the model and validate it at the same time -------------------")
+for fold in range(num_folds):
+    for epoch in range(num_epochs):
+        train_set = LCAmazon(root="DATA", split="train", modality="AE", aug_geometric=True, num_folds=num_folds, fold_index=fold)
+        val_set = LCAmazon(root="DATA", split="val", modality="AE",num_folds=num_folds, fold_index=fold)
+        # build dataloaders
+        train_dl = DataLoader(train_set, batch_size=16, shuffle=True)
+        val_dl = DataLoader(val_set, batch_size=16)
+        trainloss, trainaccuracy = train_epoch(train_dl, model, optimizer)
+        valloss, valaccuracy = validate_epoch(val_dl, model)
+        print(f"fold {fold+1}; epoch {epoch+1}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
+        print(f"fold {fold+1}; epoch {epoch+1}; valloss {valloss:.2f}, val accuracy {valaccuracy*100:.2f}%")
+        stats[fold].append({
+            "trainloss":float(trainloss),
+            "trainaccuracy":float(trainaccuracy), 
+            "valloss":float(valloss),
+            "valaccuracy":float(valaccuracy),
+            "epoch":epoch
+        })
 
-# ---------- Training loop with best‑val checkpoint ----------
-while epoch < num_epochs:
-    model, loss_train, oa_train = train_epoch(train_dl, model, optim, device)
-    loss_val, oa_val = validate_epoch(val_dl, model, device)
-    scheduler.step(loss_val)
+print(f"-------------- Training done ; number of epochs = {num_epochs} -------------------")
 
-    print("[Ep. {}/{}] Loss train: {:.2f}, val: {:.2f}; OA train: {:.2f}, val: {:.2f}".format(
-        epoch + 1, num_epochs,
-        loss_train, loss_val,
-        100 * oa_train, 100 * oa_val
-    ))
+#saving model
+save_model(model, epoch, fold)
 
-    # Save last epoch
-    save_model(model, epoch + 1)
+# Plotting accuracy as a function of epoch
+for fold in range(num_folds):
+    trainlosses = np.stack([stat["trainloss"] for stat in stats[fold]])
+    trainaccuracy = np.stack([stat["trainaccuracy"] for stat in stats[fold]])
+    vallosses = np.stack([stat["valloss"] for stat in stats[fold]])
+    valaccuracy = np.stack([stat["valaccuracy"] for stat in stats[fold]])
+    epoch = np.stack([stat["epoch"] for stat in stats[fold]])
 
-    # Save best‑validation model
-    if oa_val > best_val_oa:
-        best_val_oa = oa_val
-        epochs_no_improve = 0
-        save_model(model, epoch + 1, tag="best")
-    else:
-        epochs_no_improve += 1
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    # Accuracy plot
+    ax1.plot(epoch, trainaccuracy, label="Train Accuracy", marker='o')
+    ax1.plot(epoch, valaccuracy, label="Validation Accuracy", marker='x')
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel(f"Accuracy of fold {fold+1}")
+    ax1.set_title("Accuracy")
+    ax1.grid(True)
+    ax1.legend()
+    # Loss plot
+    ax2.plot(epoch, trainlosses, label="Train Loss", marker='o', linestyle='--', color='red')
+    ax2.plot(epoch, vallosses, label="Val Loss", marker='x', linestyle='--', color='orange')
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("Loss")
+    ax2.set_title(f"Loss of fold {fold+1}")
+    ax2.grid(True)
+    ax2.legend()
 
-    if epochs_no_improve >= patience:
-        print(f"Early stopping at epoch {epoch+1}")
-        break
-
-    epoch += 1
-
-# Later, for predictions/visualization, you can load "best" instead of "latest"
-# model, _ = load_model(epoch="best")
-
-# La partie visualisation se fait sur le jupyter notebook "plot.ipynb"
-# J'implémente ici une feature qui permet de sauvegarder les images de prédiction dans modeloutputs/AE_prediction/
-# Le dossier en question est dans gitignore, il faut donc créer un dossier vide qui s'appelle AE_prediction pour que ça marche
-
-def save_predictions(dataset, model, device="cuda"):
-    #we want to save the prediction map of the trained model to plot it later for qualitative assessment
-    model.eval()
-    model.to(device)
-    for idx in tqdm(range(len(dataset)), desc="Saving predictions"):
-        img, _ = dataset[idx]
-        #get original GT path to recover filename + metadata
-        _, gt_path = dataset.samples[idx]
-        fname = os.path.basename(gt_path)
-        out_path = os.path.join("modeloutputs/AE_prediction", fname)
-        #prepare input
-        x = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
-        x = x.to(device)
-        #forward pass
-        pred = model(x).argmax(1).squeeze().cpu().detach().numpy().astype(np.uint8)
-        #read gt metadata
-        with rasterio.open(gt_path) as src:
-            profile = src.profile
-        #update profile for single-band label mask
-        profile.update(
-            dtype=rasterio.uint8,
-            count=1,
-            compress="lzw"
-        )
-        #save prediction
-        with rasterio.open(out_path, "w", **profile) as dst:
-            dst.write(pred, 1)
-
-
-# Saving prediction maps
-os.makedirs("modeloutputs/AE_prediction", exist_ok=True)
-best_model, _ = load_model(epoch="best")
-print("Saving training predictions with best model...")
-save_predictions(d_train, best_model)
-print("Predictions saved in modeloutputs/AE_prediction")
-
-# Il y a encore une erreur dans la ligne 277         pred = model(x).argmax(1).squeeze().cpu().detach().numpy().astype(np.uint8)
-# A fixer
-
-
-
-def visualize(dataLoader, epochs, numImages=5):
-  models = [load_model(e)[0] for e in epochs]
-  numModels = len(models)
-  for idx, (data, labels) in enumerate(dataLoader):
-    if idx == numImages:
-      break
-
-    _, ax = plt.subplots(nrows=1, ncols=numModels+1, figsize = (20, 15))
-
-    # plot ground truth
-    ax[0].imshow(labels[0,...].cpu().numpy())
-    ax[0].axis('off')
-    if idx == 0:
-      ax[0].set_title('Ground Truth')
-
-    for mIdx, model in enumerate(models):
-        model = model.to(device)
-        with torch.no_grad():
-            data_vis = data.to(device)
-            data_vis = data_vis.permute(0, 3, 1, 2).contiguous()
-            pred = model(data_vis)
-        # get the label (i.e., the maximum position for each pixel along the class dimension)
-        yhat = torch.argmax(pred, dim=1)
-
-        # plot model predictions
-        ax[mIdx+1].imshow(yhat[0,...].cpu().numpy())
-        ax[mIdx+1].axis('off')
-        if idx == 0:
-          ax[mIdx+1].set_title(f'Epoch {epochs[mIdx]}')
-
-
-# visualize predictions for a number of epochs
-
-# load model states at different epochs
-epochs = ["best", 1, 5, "latest"]
-visualize(val_dl, epochs, numImages=5)
-
-
+    plt.tight_layout()
+    os.makedirs('modeloutputs/AE_accuracy_final', exist_ok=True)
+    plt.savefig(f"modeloutputs/AE_accuracy_final/s2_train_val_accuracy_fold{fold+1}.png")
+    print("Accuracy figure saved in modeloutputs/AE_accuracy_final/")

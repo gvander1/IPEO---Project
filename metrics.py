@@ -178,7 +178,7 @@ def save_metrics(conf_mat, modality ="s2", split="non-specified"):
         transform=plt.gca().transAxes, fontsize=12, verticalalignment='center')
     plt.tight_layout()
     os.makedirs('modeloutputs/metrics', exist_ok=True)
-    plt.savefig(f"modeloutputs/metrics/{modality}_{split}_confusion_matrix_20epochs.png", dpi=300)
+    plt.savefig(f"modeloutputs/metrics/{modality}_{split}_confusion_matrix.png", dpi=300)
     plt.close()
 
 
@@ -240,7 +240,7 @@ def load_model_AE_RF():
     return(rf, scaler)
 
 # Load models
-model_s2=load_model_sentinel("models/trained_models_dump/Sentinel-folds-20epoch.pth")
+model_s2=load_model_sentinel("models/s2_final.pth")
 model_AE=load_model_AE("models/AE/best.pth")
 rf, scaler=load_model_AE_RF()
 
