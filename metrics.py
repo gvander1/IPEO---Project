@@ -15,7 +15,6 @@ import joblib
 from models.lcamazon import LCAmazon
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from torch.utils.data import ConcatDataset
 from sklearn.metrics import confusion_matrix
 
 #Checking if GPU is available
@@ -186,55 +185,65 @@ def save_metrics(conf_mat, modality ="s2", split="non-specified"):
 
 # Loading models
 # Trained Sentinel-2 Model
-from torchvision.models.segmentation import fcn_resnet50
-model_s2 = fcn_resnet50(progress=True, num_classes=13)  #we have 13 classes (including 0)
-# The resnet18 model is made for 3 bands --> need to change the first convolution layer to fix this
-model_s2.backbone.conv1 = torch.nn.Conv2d(
-    in_channels=12,
-    out_channels=64,
-    kernel_size=7,
-    stride=2,
-    padding=3,
-    bias=False
-)
-# State of parameters saved in "models/s2/"
-state_dict_s2 = torch.load("models/s2/epoch19_fold4.pth", map_location="cpu")
-model_s2.load_state_dict(state_dict_s2)
+def load_model_sentinel(model_path):
+    print("test")
+    from torchvision.models.segmentation import fcn_resnet50
+    model_s2 = fcn_resnet50(progress=True, num_classes=13)  #we have 13 classes (including 0)
+    # The resnet18 model is made for 3 bands --> need to change the first convolution layer to fix this
+    model_s2.backbone.conv1 = torch.nn.Conv2d(
+        in_channels=12,
+        out_channels=64,
+        kernel_size=7,
+        stride=2,
+        padding=3,
+        bias=False)
+    # State of parameters saved in "models/s2/"
+    state_dict_s2 = torch.load(model_path, map_location="cpu")
+    model_s2.load_state_dict(state_dict_s2)
+    return model_s2
 
 # Trained AE DL Model (from train_model_AE_DL)
-class PerPixelMLPWithContext(nn.Module):
-    def __init__(self, in_channels=64, hidden_dim=256, num_classes=13, p_drop=0.2):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(in_channels, hidden_dim, 3, padding=1),
-            nn.BatchNorm2d(hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(p_drop),
+def load_model_AE(model_path):
+    class PerPixelMLPWithContext(nn.Module):
+        def __init__(self, in_channels=64, hidden_dim=256, num_classes=13, p_drop=0.2):
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Conv2d(in_channels, hidden_dim, 3, padding=1),
+                nn.BatchNorm2d(hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Dropout2d(p_drop),
 
-            nn.Conv2d(hidden_dim, hidden_dim, 3, padding=1),
-            nn.BatchNorm2d(hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(p_drop),
+                nn.Conv2d(hidden_dim, hidden_dim, 3, padding=1),
+                nn.BatchNorm2d(hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Dropout2d(p_drop),
 
-            nn.Conv2d(hidden_dim, hidden_dim, 1),
-            nn.BatchNorm2d(hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(p_drop),
+                nn.Conv2d(hidden_dim, hidden_dim, 1),
+                nn.BatchNorm2d(hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Dropout2d(p_drop),
 
-            nn.Conv2d(hidden_dim, num_classes, 1),
-        )
+                nn.Conv2d(hidden_dim, num_classes, 1),)
 
-    def forward(self, x):
-        return self.net(x)
+        def forward(self, x):
+            return self.net(x)
 
-model_AE = PerPixelMLPWithContext(in_channels=64, hidden_dim=256, num_classes=13)
-# State of parameters saved in "models/AE/"
-state_dict_AE = torch.load("models/AE/best.pth", map_location="cpu")
-model_AE.load_state_dict(state_dict_AE)
+    model_AE = PerPixelMLPWithContext(in_channels=64, hidden_dim=256, num_classes=13)
+    # State of parameters saved in "models/AE/"
+    state_dict_AE = torch.load(model_path, map_location="cpu")
+    model_AE.load_state_dict(state_dict_AE)
+    return model_AE
 
 # Trained Random Forest for AE
-rf=joblib.load("models/AE_RF/rf_model.pkl")
-scaler=joblib.load("models/AE_RF/scaler.pkl")
+def load_model_AE_RF():
+    rf=joblib.load("models/AE_RF/rf_model.pkl")
+    scaler=joblib.load("models/AE_RF/scaler.pkl")
+    return(rf, scaler)
+
+# Load models
+model_s2=load_model_sentinel("models/s2/best.pth")
+model_AE=load_model_AE("models/AE/best.pth")
+rf, scaler=load_model_AE_RF()
 
 # DATA
 # Sentinel-2

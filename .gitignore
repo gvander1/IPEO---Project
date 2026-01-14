@@ -208,10 +208,15 @@ __marimo__/
 
 #files to ignore 
 DATA/
-modeloutputs/
+modeloutputs/AE_prediction
+modeloutputs/AE_prediction_new
+modeloutputs/AE_RF_prediction
+modeloutputs/s2_prediction
 models/s2/
 models/AE_new/
 models/AE_RF/
 models/__pycache__
+models/trained_models_dump/
+
 rf_ae_model.joblib
 rf_ae_model.joblib
