@@ -93,8 +93,8 @@ def random_forest_eval(dataset, rf, scaler, split):
         #get original GT path to recover filename + metadata
         _, gt_path = dataset.samples[i]
         fname = os.path.basename(gt_path)
-        os.makedirs("modeloutputs/AE_RF_prediction", exist_ok=True)
-        out_path = os.path.join("modeloutputs/AE_RF_prediction", fname)
+        os.makedirs("final_predictions/AE_RF_final", exist_ok=True)
+        out_path = os.path.join("final_predictions/AE_RF_final", fname)
         H, W, C = img.shape
         X_img = img.reshape(-1, C)
         y_img = lbl.reshape(-1)
