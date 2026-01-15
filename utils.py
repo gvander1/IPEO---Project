@@ -1,4 +1,4 @@
-# Loading models
+# Loading models for inference.ipynb
 # Trained Sentinel-2 Model
 def load_model_sentinel(model_path):
     import torch

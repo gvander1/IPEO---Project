@@ -119,6 +119,7 @@ def prediction_step(batch, model, device="cuda"):
 
 
 def train_epoch(train_dl, val_dl, model, optimizer):
+    # Train and compute stats for later !
     train_losses, train_accuracies, val_losses, val_accuracies = [], [], [], []
     for batch in tqdm(train_dl):
         loss, accuracy = training_step(batch, model, optimizer)
@@ -132,21 +133,23 @@ def train_epoch(train_dl, val_dl, model, optimizer):
     return val_losses, train_losses, val_accuracies, train_accuracies
 
 
-
+''' OLD FUNCTION
 def save_model(model, epoch, fold, tag):
   os.makedirs('models/s2', exist_ok=True)
   if tag == "best":
       torch.save(model.state_dict(), open(f'models/s2/{tag}.pth', 'wb'))
   else:
       torch.save(model.state_dict(), open(f'models/s2/{tag}_fold{fold+1}_epoch{epoch+1}.pth', 'wb'))
+'''
+def save_model(model):
+  os.makedirs('final_models', exist_ok=True)
+  torch.save(model.state_dict(), open(f'final_models/s2_final.pth', 'wb'))
 
 # Model Training
 num_folds = 5
-num_epochs = 40 #computation time about 30 seconds/epoch
-patience = 15
+num_epochs = 20 #computation time about 30 seconds/epoch
 stats = []
-best_valaccuracy = -1.0
-epochs_no_improve = 0
+
 for i in range(num_folds):
     stats.append([])
 print("-------------- Training the model and validate it at the same time -------------------")
@@ -167,25 +170,12 @@ for fold in range(num_folds):
             "valaccuracy":float(valaccuracy),
             "epoch":epoch
         })
-            # Save best‑validation model
-        if valaccuracy > best_valaccuracy:
-            best_valaccuracy = valaccuracy
-            epochs_no_improve = 0
-            save_model(model, epoch + 1, fold, tag="best")
-        else:
-            epochs_no_improve += 1
-        # early stopping of training if no improvement since 8 epochs
-        # shorter computation time by fold
-        if epochs_no_improve >= patience:
-            print(f"Early stopping at epoch {epoch+1}")
-            epochs_no_improve=0
-            break
         epoch += 1
 
 print(f"-------------- Training done ; number of epochs = {num_epochs} -------------------")
 
 #saving model
-save_model(model, epoch, fold, tag="last")
+save_model(model)
 
 # Plotting accuracy as a function of epoch
 for fold in range(num_folds):
@@ -217,6 +207,8 @@ for fold in range(num_folds):
     os.makedirs('modeloutputs/s2_accuracy', exist_ok=True)
     plt.savefig(f"modeloutputs/s2_accuracy/s2_train_val_accuracy_fold{fold+1}.png")
     print("Accuracy figure saved in modeloutputs/s2_accuracy/")
+
+
 
 # ====================== THE PART BELOW HAS BEEN MOVED TO metrics.py AND IS NOT USED ANYMORE =======================
 '''
