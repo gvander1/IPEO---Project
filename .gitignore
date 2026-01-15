@@ -217,6 +217,8 @@ models/AE_new/
 models/AE_RF/
 models/__pycache__
 models/trained_models_dump/
+final_models/
+final_predictions/
 
 rf_ae_model.joblib
 rf_ae_model.joblib

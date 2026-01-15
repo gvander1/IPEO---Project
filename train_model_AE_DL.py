@@ -121,23 +121,31 @@ def validate_epoch(data_loader, model, device="cuda"):
     return loss_total, oa_total
 
 
-def save_model(model, epoch, fold):
+def save_model(model, epoch, fold=None, tag=None):
     os.makedirs('models/AE_final', exist_ok=True)
-    torch.save(model.state_dict(), open(f'models/AE_final/fold{fold+1}_epoch{epoch+1}.pth', 'wb'))
+    if not fold==None:
+        torch.save(model.state_dict(), open(f'models/AE_final/fold{fold+1}_epoch{epoch+1}.pth', 'wb'))
+    elif not tag==None:
+        torch.save(model.state_dict(), open(f'models/AE_final/{tag}_final_1e-3.pth', 'wb'))
 
+
+
+
+# Model Training
+
+# With Folds ! (Uncomment to implement)
+'''
 
 # ---------- Hyperparameters ----------
 learning_rate = 1e-4        # Adam lr
 weight_decay  = 1e-4
-num_epochs    = 20        # train longer
-
+num_epochs    = 20        
+num_folds = 5
+num_epochs = 20 #computation time about 43 seconds/epoch
 
 # Load / init model and optimiser
 optimizer = setup_optimiser(model, learning_rate, weight_decay)
 
-# Model Training
-num_folds = 5
-num_epochs = 20 #computation time about 43 seconds/epoch
 stats = []
 for i in range(num_folds):
     stats.append([])
@@ -196,3 +204,85 @@ for fold in range(num_folds):
     os.makedirs('modeloutputs/AE_accuracy_final', exist_ok=True)
     plt.savefig(f"modeloutputs/AE_accuracy_final/s2_train_val_accuracy_fold{fold+1}.png")
     print("Accuracy figure saved in modeloutputs/AE_accuracy_final/")
+
+'''
+
+#Without Folds:
+# ---------- Hyperparameters ----------
+learning_rate = 1e-3        # Adam lr
+weight_decay  = 1e-4
+num_epochs    = 50
+patience      = 16 # early stopping   
+
+# Load / init model and optimiser
+optimizer = setup_optimiser(model, learning_rate, weight_decay)
+
+stats = []
+best_val_oa = -1.0
+epochs_no_improve = 0
+print("-------------- Training the model and validate it at the same time -------------------")
+for epoch in range(num_epochs):
+    train_set = LCAmazon(root="DATA", split="train", modality="AE", aug_geometric=True)
+    val_set = LCAmazon(root="DATA", split="val", modality="AE")
+    # build dataloaders
+    train_dl = DataLoader(train_set, batch_size=16, shuffle=True)
+    val_dl = DataLoader(val_set, batch_size=16)
+    trainloss, trainaccuracy = train_epoch(train_dl, model, optimizer)
+    valloss, valaccuracy = validate_epoch(val_dl, model)
+    print(f"epoch {epoch+1}; trainloss {trainloss:.2f}, train accuracy {trainaccuracy*100:.2f}%")
+    print(f"epoch {epoch+1}; valloss {valloss:.2f}, val accuracy {valaccuracy*100:.2f}%")
+    stats.append({
+        "trainloss":float(trainloss),
+        "trainaccuracy":float(trainaccuracy), 
+        "valloss":float(valloss),
+        "valaccuracy":float(valaccuracy),
+        "epoch":epoch
+    })
+
+    if valaccuracy > best_val_oa:
+        best_val_oa = valaccuracy
+        epochs_no_improve = 0
+        save_model(model, epoch, tag="best")
+    else:
+        epochs_no_improve += 1
+
+    if epochs_no_improve >= patience:
+        print(f"Early stopping at epoch {epoch+1}")
+        break
+
+print(f"-------------- Training done ; number of epochs = {num_epochs} -------------------")
+
+#saving model
+save_model(model, epoch, tag="last")
+
+# Plotting accuracy as a function of epoch
+
+trainlosses = np.stack([stat["trainloss"] for stat in stats])
+trainaccuracy = np.stack([stat["trainaccuracy"] for stat in stats])
+vallosses = np.stack([stat["valloss"] for stat in stats])
+valaccuracy = np.stack([stat["valaccuracy"] for stat in stats])
+epoch = np.stack([stat["epoch"] for stat in stats])
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+# Accuracy plot
+ax1.plot(epoch, trainaccuracy, label="Train Accuracy", marker='o')
+ax1.plot(epoch, valaccuracy, label="Validation Accuracy", marker='x')
+ax1.set_xlabel("Epoch")
+ax1.set_ylabel(f"Accuracy of fold")
+ax1.set_title("Accuracy (AE)")
+ax1.grid(True)
+ax1.legend()
+# Loss plot
+ax2.plot(epoch, trainlosses, label="Train Loss", marker='o', linestyle='--', color='red')
+ax2.plot(epoch, vallosses, label="Val Loss", marker='x', linestyle='--', color='orange')
+ax2.set_xlabel("Epoch")
+ax2.set_ylabel("Loss")
+ax2.set_title(f"Loss (AE)")
+ax2.grid(True)
+ax2.legend()
+
+plt.tight_layout()
+os.makedirs('modeloutputs/AE_accuracy_final', exist_ok=True)
+plt.savefig(f"modeloutputs/AE_accuracy_final/AE_train_val_accuracy_1e-3.png")
+print("Accuracy figure saved in modeloutputs/AE_accuracy_final/")
+

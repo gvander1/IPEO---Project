@@ -47,7 +47,7 @@ def forward_pass(dataset, model, device="cuda", num_classes=13, modality="s2", s
     # initialize confusion  matrix
     overall_conf_mat = np.zeros((num_classes, num_classes), dtype=np.int64)
     # output directories
-    output_dir = f"modeloutputs/{modality}_prediction"
+    output_dir = f"final_predictions/{modality}_final"
     os.makedirs(output_dir, exist_ok=True)
     print(f"----------------- Computing predictions and metrics for {modality} model over {split} --------------------------")
     for idx in tqdm(range(len(dataset)), desc="Forward pass"):
@@ -177,8 +177,8 @@ def save_metrics(conf_mat, modality ="s2", split="non-specified"):
         f"Mean F1 Score: {np.nanmean(f1):.4f}",
         transform=plt.gca().transAxes, fontsize=12, verticalalignment='center')
     plt.tight_layout()
-    os.makedirs('modeloutputs/metrics', exist_ok=True)
-    plt.savefig(f"modeloutputs/metrics/{modality}_{split}_confusion_matrix.png", dpi=300)
+    os.makedirs('final_metrics', exist_ok=True)
+    plt.savefig(f"final_metrics/{modality}_{split}_confusion_matrix.png", dpi=300)
     plt.close()
 
 
@@ -235,13 +235,13 @@ def load_model_AE(model_path):
 
 # Trained Random Forest for AE
 def load_model_AE_RF():
-    rf=joblib.load("models/AE_RF/rf_model.pkl")
-    scaler=joblib.load("models/AE_RF/scaler.pkl")
+    rf=joblib.load("final_models/AE_RF_final/rf_model.pkl")
+    scaler=joblib.load("final_models/AE_RF_final/scaler.pkl")
     return(rf, scaler)
 
 # Load models
-model_s2=load_model_sentinel("models/s2_final.pth")
-model_AE=load_model_AE("models/AE/best.pth")
+model_s2=load_model_sentinel("final_models/s2_final.pth")
+model_AE=load_model_AE("final_models/AE_final.pth")
 rf, scaler=load_model_AE_RF()
 
 # DATA
@@ -259,15 +259,12 @@ test_conf_mat_AE=forward_pass(test_dataset_AE, model_AE, modality ="AE", split="
 
 # Save metrics
 save_metrics(conf_mat_s2, modality="s2", split="train_all")
-#save_metrics(conf_mat_AE, modality="AE", split="train_all")
+save_metrics(conf_mat_AE, modality="AE", split="train_all")
 save_metrics(test_conf_mat_s2, modality="s2", split="test")
-#save_metrics(test_conf_mat_AE, modality="AE", split="test")
+save_metrics(test_conf_mat_AE, modality="AE", split="test")
 
 
-
-'''
 conf_mat_AE_RF=random_forest_eval(dataset_AE, rf, scaler, split="train_all")
 test_conf_mat_AE_RF=random_forest_eval(test_dataset_AE, rf, scaler, split="test")
 save_metrics(conf_mat_AE_RF, modality="AE_RF", split="train_all")
 save_metrics(test_conf_mat_AE_RF, modality="AE_RF", split="test")
-'''
