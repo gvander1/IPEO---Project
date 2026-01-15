@@ -1,7 +1,18 @@
 ### IPEO---Project
 # Comparison of satellite images and learned embeddings for land cover mapping in the Brazilian Amazon
 
-# 1. Install dependencies
+EPFL - ENV-540
+Van der Bruggen Gaétane
+Steiner Maxime
+Ramabdran Philip
+
+The aim of this project was to train 3 different semantic segmentation models to map land cover in the Brazilian Amazon. The performance of one deep-learning convnet on Sentinel-2 imagery and two AlphaEarth Embedding-base models (a Random Forest per pixel Classifier and a deep-learning convnet) were compared.
+
+# A. Environment
+
+
+
+### 1. Install dependencies
 In order to run the code following librairies need to be installed by running following lines in a terminal:
 ```bash
 pip install numpy
@@ -11,7 +22,7 @@ pip install pandas # not sure if this is needed in the end...
 pip install seaborn
 ```
 
-# 2. Data preprocessing
+### 2. Data preprocessing
 Since the original data has some classes that only appear in one of the test/train set, we need to disregard 483
 images that contain those classes when loading the data. This has to be done by running the script **Images_to_disregard.py**
 ```bash
