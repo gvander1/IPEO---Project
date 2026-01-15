@@ -25,16 +25,14 @@ train_dl = DataLoader(d_train, batch_size=batch_size, shuffle=True,  num_workers
 val_dl   = DataLoader(d_val,   batch_size=batch_size, shuffle=False, num_workers=1)
 
 
-# ---------- Normalization ----------
+# Normalization
 read = np.load("mean_std/AE.npy")
 mean, std = read[0], read[1]
 mean = torch.tensor(mean)
 std  = torch.tensor(std)
 normalize = T.Normalize(mean, std)
 
-# ---------- Model ----------
-#We need pixel wise classification so semantic segmentation
-#Starting with small fully connected convolutional network that does per pixel classification with local context on feature map
+# Model architecture
 class PerPixelMLPWithContext(nn.Module):
     def __init__(self, in_channels=64, hidden_dim=256, num_classes=13, p_drop=0.2):
         super().__init__()
@@ -70,10 +68,9 @@ weights = torch.tensor(1/np.sqrt(class_frequency), dtype=torch.float32).to("cuda
 criterion = CrossEntropyLoss(weight=weights)
 
 def setup_optimiser(model, learning_rate, weight_decay):
-    # Adam usually converges better than high‑lr SGD for this setup [web:97][web:109]
     return torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-# ---------- Train / val loops ----------
+# Training loop
 def train_epoch(data_loader, model, optimiser, device="cuda"):
     model.train()
     loss_total = 0.0
@@ -98,6 +95,7 @@ def train_epoch(data_loader, model, optimiser, device="cuda"):
     oa_total /= len(data_loader)
     return loss_total, oa_total
 
+# Validation loop
 def validate_epoch(data_loader, model, device="cuda"):
     model.eval()
     loss_total = 0.0
@@ -120,10 +118,12 @@ def validate_epoch(data_loader, model, device="cuda"):
     oa_total /= len(data_loader)
     return loss_total, oa_total
 
-
+# Save models
 def save_model(model, epoch, fold=None, tag=None):
     os.makedirs('models/AE_final', exist_ok=True)
     if not fold==None:
+        # former feature when we tried K-folds
+
         torch.save(model.state_dict(), open(f'models/AE_final/fold{fold+1}_epoch{epoch+1}.pth', 'wb'))
     elif not tag==None:
         torch.save(model.state_dict(), open(f'models/AE_final/{tag}_final_1e-3.pth', 'wb'))
