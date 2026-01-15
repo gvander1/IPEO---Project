@@ -3,9 +3,42 @@
 
 Van der Bruggen Gaétane, Steiner Maxime, Ramabadran Philip
 
-The aim of this project was to train 3 different semantic segmentation models to map land cover in the Brazilian Amazon. The performance of one deep-learning convnet on Sentinel-2 imagery and two AlphaEarth Embedding-base models (a Random Forest per pixel Classifier and a deep-learning convnet) were compared.
+The aim of this project was to train 3 different semantic segmentation models to map land cover in the Brazilian Amazon. The performance of one deep-learning convnet on Sentinel-2 imagery and two AlphaEarth Embedding-base models (a Random Forest per pixel Classifier and a deep-learning convnet) were compared. For further details please refer to the provided report.
 
-# A. Requirements
+# A. Repo Content
+
+```bash
+.
+├── Test_for_inference/        # Example data for running inference
+├── archives_unused_scripts/   # Old experimental scripts (not used in main pipeline)
+├── final_metrics/             # Stored metrics and evaluation results (reproducible)
+├── mean_std/                  # Mean / std statistics for normalization
+├── modeloutputs/              # Saved model predictions and intermediate outputs (not final !!)
+│   ├── AE_accuracy/           # Different accuracies over Epochs during training
+│   ├── AE_accuracy_final/      
+│   ├── metrics/               # Confusion Matrices
+│   └── s2_accuracy/            
+├── models/                    
+│   ├── AE/                    # former model used for fine-tune
+│   ├── AE_final/              # former model
+│   └── lcamazon.py            # Class that loads and preprocesses the data, called during training / central pipeline architecture
+├── Images_to_discard.npy      # Indices of discarded images
+├── Images_to_disregard.py     # Script defining images to ignore
+├── acc_for_hp_RF              # Accuracy logs for RF hyperparameter choice
+├── class_frequency.npy        # Class frequency for weighted Cross-Entropy
+├── compute_mean_std.py        # Script to compute mean/std over the train/val dataset for normalization
+├── environment.yml            # Conda environment specification
+├── inference.ipynb            # Notebook to run inference
+├── label_proportion.py        # Compute label proportions for weighted Cross-Entropy
+├── metrics.py                 # Script to compute confusion matrices and save prediction after the models are trained
+├── plot.ipynb                 # Notebook for plotting results after predictions are saved
+├── train_model_AE_DL.py       # Training script for AE_DL model
+├── train_model_AE_RF.py       # Training script for AE_RF model
+├── train_model_sentinel.py    # Training script for Sentinel-2 DL model
+├── utils.py                   # Useful functions called by other scripts
+└── README.md                  # Project documentation --> the one your reading right now !
+
+# B. Requirements
 
 Install dependencies using the provided environment.yml file
 
@@ -19,7 +52,7 @@ The test images are already provided in this git in the directory "Test_for_infe
 
 If you want to download orginal DATA to reproduce our results, together with the prediction maps of our models and performance metrics, please use [this link]
 
-# B. Inference
+# C. Inference
 
 In order to run inference, make sure the model weights are downloaded and put in the main directory, then run the jupyter notebook **inference.ipynb** by running the following line in the terminal:
 
@@ -28,9 +61,9 @@ jupyter notebook inference.ipynb
 ```
 It will load some functions from the script **utils.py**
 
-# C. Reproduce results
+# D. Reproduce results
 
-If you want to reproduce our results, first downloaded the "DATA" folder (cf. A.), then follow these instruction.
+If you want to reproduce our results, first downloaded the "DATA" folder (cf. B.), then follow these instructions.
 
 ## 1. Data preprocessing
 Since the original data has some classes that only appear in one of the test/train set, we need to disregard 483
@@ -70,7 +103,7 @@ please try again the first steps to connect to the GPU
 
 The trained model will be saved.
 ### b. Deep Learning model for AE Embeddings semantic segmentation
-A GPU is also needed ! Follow the same instruction as for 3.a.
+A GPU is also needed ! Follow the same instruction as for 2.a.
 ```bash
 python train_model_AE_DL.py
 ```
@@ -83,15 +116,18 @@ python train_model_AE_RF.py
 The trained model will be saved.
 ## 3. Computing metrics
 Compute metrics by running this script:
-Run this line in terminal:
 ```bash
 python metrics.py
 ```
 Confusion matrices will be saved in the **final_predictions** directory
+Prediction maps will be saved in the **final_predictions** directory
 
-# 4. Visualisation
+## 4. Visualisation
 To access qualitatve assessment of the semantic segmentation, you can run a jupyter notebook to visualise
 the satellite image in RGB together with groundtruth and model output. To do so, open a notebook with:
 ```bash
 jupyer notebook plot.ipynb
 ```
+
+
+And that's it !
