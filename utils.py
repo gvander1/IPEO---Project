@@ -1,5 +1,3 @@
-import torch
-
 # Loading models
 # Trained Sentinel-2 Model
 def load_model_sentinel(model_path):
@@ -57,52 +55,6 @@ def load_model_AE(model_path):
 # Trained Random Forest for AE
 def load_model_AE_RF():
     import joblib
-    rf=joblib.load("models/AE_RF/rf_model.pkl")
-    scaler=joblib.load("models/AE_RF/scaler.pkl")
+    rf=joblib.load("final_models/AE_RF_final/rf_model.pkl")
+    scaler=joblib.load("final_models/AE_RF_final/scaler.pkl")
     return(rf, scaler)
-
-
-@torch.no_grad() #without gradients
-def inference(dataset, idx, model, modality="s2", scaler=None):
-    import tqdm
-    import numpy as np
-    import torchvision.transforms as T
-    # Only runs on CPU because of the limited amount of images to predict
-    model.eval()
-    predictions = []
-    for id in tqdm(idx, desc=f"Forward pass of {modality} model"):
-        #load image and ground truth
-        print(idx)
-        print(id)
-        img, label = dataset[id]
-        #prepare input and noramlize
-        x = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
-        #normalization
-        s2=np.load("mean_std/s2.npy") # Mean and std of Sentinel-2
-        s2_mean, s2_std = s2[0], s2[1]
-        s2_mean, s2_std = torch.tensor(s2_mean), torch.tensor(s2_std)
-        s2_normalize = T.Normalize(s2_mean, s2_std)
-        AE=np.load("mean_std/AE.npy") # Mean and std of AE-Embeddings
-        AE_mean, AE_std = AE[0], AE[1]
-        AE_mean, AE_std = torch.tensor(AE_mean), torch.tensor(AE_std)
-        AE_normalize = T.Normalize(AE_mean, AE_std) 
-        #inference
-        if modality == "s2":
-            x = s2_normalize(x)
-            #forward pass
-            outputs = model(x)
-            pred = outputs["out"].argmax(1).squeeze(0).numpy().astype(np.uint8)
-        elif modality == "AE":
-            x = AE_normalize(x)
-            #forward pass
-            pred = model(x)
-            pred = pred.argmax(1).squeeze(0).numpy().astype(np.uint8)
-        elif modality == "AE_RF":
-            x = img.astype(np.float32)
-            x = scaler.transform(x)
-            #prediction
-            pred = model.predict(x)
-        else:
-            print("Modality must be 'AE', 'AE_RF' or 's2'")
-        predictions.append(pred)
-    return predictions
