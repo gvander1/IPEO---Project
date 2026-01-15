@@ -5,7 +5,7 @@ Van der Bruggen Gaétane, Steiner Maxime, Ramabadran Philip
 
 The aim of this project was to train 3 different semantic segmentation models to map land cover in the Brazilian Amazon. The performance of one deep-learning convnet on Sentinel-2 imagery and two AlphaEarth Embedding-base models (a Random Forest per pixel Classifier and a deep-learning convnet) were compared. For further details please refer to the provided report.
 
-# A. Repo Content
+# A. Repo Structure
 
 ```bash
 .
@@ -50,7 +50,7 @@ A jupyter notebook is provided to run inference on 2 test images. To use it, you
 
 The test images are already provided in this git in the directory "Test_for_inference". Nothing has to be done about it.
 
-If you want to download orginal DATA to reproduce our results, together with the prediction maps of our models and performance metrics, please use [this link]
+If you want to reproduce our results, you must download orginal DATA using [this link](https://filesender.switch.ch/filesender2/?s=download&token=1cebb60f-874d-4be1-9e88-82c1ade7439a)
 
 # C. Inference
 
