@@ -37,7 +37,7 @@ The aim of this project was to train 3 different semantic segmentation models to
 ├── train_model_sentinel.py    # Training script for Sentinel-2 DL model
 ├── utils.py                   # Useful functions called by other scripts
 └── README.md                  # Project documentation --> the one your reading right now !
-
+```
 # B. Requirements
 
 Install dependencies using the provided environment.yml file
@@ -51,6 +51,22 @@ A jupyter notebook is provided to run inference on 2 test images. To use it, you
 The test images are already provided in this git in the directory "Test_for_inference". Nothing has to be done about it.
 
 If you want to reproduce our results, you must download orginal DATA using [this link](https://filesender.switch.ch/filesender2/?s=download&token=1cebb60f-874d-4be1-9e88-82c1ade7439a)
+
+It should look like this:
+```bash
+IPEO---PROJECT
+├── DATA/                       # Downloaded DATA here
+│   ├── S2/          
+│   ├── labels/
+│   ├── AE/
+│   └── Codigos-da-legenda-colecao-9.csv
+├── final_models/               # Downloaded trained model weights here
+│   ├── s2_final.pth         
+│   ├── AE_final.pth
+│   └── AE_RF_final/
+│       ├── rf_model.pkl
+│       └── scaler.pkl
+```
 
 # C. Inference
 
