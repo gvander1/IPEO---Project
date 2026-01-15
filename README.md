@@ -13,8 +13,11 @@ Install dependencies using the provided environment.yml file
 environment.yml
 ```
 
-A jupyter notebook is provided to run inference on 2 test images. To use it, you must download the weights of our trained models as well a subset of the test dataset using following link:
+A jupyter notebook is provided to run inference on 2 test images. To use it, you must download the weights of our trained models using [this link](https://filesender.switch.ch/filesender2/?s=download&token=143b661c-e4a8-4b7d-8024-6f09b56988e0)
 
+The test images are already provided in this git in the directory "Test_for_inference". Nothing has to be done about it.
+
+If you want to download orginal DATA to reproduce our results, together with the prediction maps of our models and performance metrics, please use [this link]
 
 ### 1. Install dependencies
 In order to run the code following librairies need to be installed by running following lines in a terminal:
