@@ -1,15 +1,19 @@
-### IPEO---Project
+### IPEO---Project / EPFL - ENV-540
 # Comparison of satellite images and learned embeddings for land cover mapping in the Brazilian Amazon
 
-EPFL - ENV-540
-Van der Bruggen Gaétane
-Steiner Maxime
-Ramabdran Philip
+Van der Bruggen Gaétane, Steiner Maxime, Ramabadran Philip
 
 The aim of this project was to train 3 different semantic segmentation models to map land cover in the Brazilian Amazon. The performance of one deep-learning convnet on Sentinel-2 imagery and two AlphaEarth Embedding-base models (a Random Forest per pixel Classifier and a deep-learning convnet) were compared.
 
-# A. Environment
+# A. Requirements
 
+Install dependencies using the provided environment.yml file
+
+```bash
+environment.yml
+```
+
+A jupyter notebook is provided to run inference on 2 test images. To use it, you must download the weights of our trained models as well a subset of the test dataset using following link:
 
 
 ### 1. Install dependencies
