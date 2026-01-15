@@ -19,17 +19,20 @@ The test images are already provided in this git in the directory "Test_for_infe
 
 If you want to download orginal DATA to reproduce our results, together with the prediction maps of our models and performance metrics, please use [this link]
 
-### 1. Install dependencies
-In order to run the code following librairies need to be installed by running following lines in a terminal:
-```bash
-pip install numpy
-pip install torch
-pip install rasterio
-pip install pandas # not sure if this is needed in the end...
-pip install seaborn
-```
+# B. Inference
 
-### 2. Data preprocessing
+In order to run inference, make sure the model weights are downloaded and put in the main directory, then run the jupyter notebook **inference.ipynb** by running the following line in the terminal:
+
+```bash
+jupyter notebook inference.ipynb
+```
+It will load some functions from the script **utils.py**
+
+# C. Reproduce results
+
+If you want to reproduce our results, first downloaded the "DATA" folder (cf. A.), then follow these instruction.
+
+## 1. Data preprocessing
 Since the original data has some classes that only appear in one of the test/train set, we need to disregard 483
 images that contain those classes when loading the data. This has to be done by running the script **Images_to_disregard.py**
 ```bash
@@ -46,10 +49,10 @@ To do so, run the script **label_proportion.py**
 python label_proportion.py
 ```
 
-# 3. Model training
+## 2. Model training
 Now let's train our 3 models !
-## a. Deep Learning model (convnet) for Sentinel-2 semantic segmentation
-For model training, first connect to the SCITAS GPU and activate a virtual environment
+### a. Deep Learning model (convnet) for Sentinel-2 semantic segmentation
+For model training, first connect to the SCITAS GPU and activate a virtual environment. It must have all the dependencies listed in environment.yml
 ```bash
 Sinteract -a env540 -g gpu:1 -t 03:00:00
 source ipeo_venv/bin/activate
@@ -65,14 +68,26 @@ python train_model_sentinel.py
 If the terminal prints **GPU to be started**, this means the GPU is not available. If this is the case
 please try again the first steps to connect to the GPU
 
-## b. Deep Learning model for AE Embeddings semantic segmentation
+The trained model will be saved.
+### b. Deep Learning model for AE Embeddings semantic segmentation
 A GPU is also needed ! Follow the same instruction as for 3.a.
 ```bash
 python train_model_AE_DL.py
 ```
-
-## c. Random Forest for AE Embeddings
-Work in progress
+The trained model will be saved.
+### c. Random Forest for AE Embeddings
+Run this line in terminal:
+```bash
+python train_model_AE_RF.py
+```
+The trained model will be saved.
+## 3. Computing metrics
+Compute metrics by running this script:
+Run this line in terminal:
+```bash
+python metrics.py
+```
+Confusion matrices will be saved in the **final_predictions** directory
 
 # 4. Visualisation
 To access qualitatve assessment of the semantic segmentation, you can run a jupyter notebook to visualise
